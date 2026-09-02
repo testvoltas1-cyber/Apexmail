@@ -836,7 +836,8 @@ export async function sendEmailDirectOrRelay(email: Email, mailbox: Mailbox, dom
         messageIdResult = info.messageId || email.message_id;
       } catch (sendErr: any) {
         // Automatic fallback on send failure (e.g. port 587 timeout)
-        console.warn(`[SMTP Outbound] Primary send failed (${sendErr.code || sendErr.message}), attempting fallback to mail.privateemail.com:465 (SSL)...`);
+        const fallbackHost = usedHost && usedHost !== 'Direct/Internal' ? usedHost : (globalSmtp?.host || 'mail.privateemail.com');
+        console.warn(`[SMTP Outbound] Primary send failed (${sendErr.code || sendErr.message}), attempting fallback to ${fallbackHost}:465 (SSL)...`);
         
         const authInfo = domain?.custom_smtp_user ? {
           user: domain.custom_smtp_user,
@@ -848,7 +849,7 @@ export async function sendEmailDirectOrRelay(email: Email, mailbox: Mailbox, dom
 
         if (authInfo) {
           const fallbackTransporter = nodemailer.createTransport({
-            host: 'mail.privateemail.com',
+            host: fallbackHost,
             port: 465,
             secure: true,
             auth: authInfo,
@@ -861,7 +862,7 @@ export async function sendEmailDirectOrRelay(email: Email, mailbox: Mailbox, dom
 
           const fbInfo = await fallbackTransporter.sendMail(mailOptions);
           messageIdResult = fbInfo.messageId || email.message_id;
-          usedHost = 'mail.privateemail.com';
+          usedHost = fallbackHost;
           usedPort = 465;
           usedTls = 'SSL/TLS';
         } else {

@@ -314,7 +314,7 @@ export const api = {
     });
   },
 
-  async autoSetupSmtp(payload: { email_address?: string; password: string }): Promise<{ success: boolean; message: string; config: SmtpServerConfig; logs: string[] }> {
+  async autoSetupSmtp(payload: { email_address?: string; password: string; provider?: string; host?: string; port?: number; secure?: boolean }): Promise<{ success: boolean; message: string; config: SmtpServerConfig; logs: string[] }> {
     return apiFetch<{ success: boolean; message: string; config: SmtpServerConfig; logs: string[] }>('/api/admin/smtp/auto-setup', {
       method: 'POST',
       body: JSON.stringify(payload),

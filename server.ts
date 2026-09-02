@@ -1051,7 +1051,7 @@ ${body_html || `<p>${(body_text || 'This is a test inbound email message receive
       return res.status(403).json({ error: 'Admin access required' });
     }
 
-    const { email_address, password } = req.body;
+    const { email_address, password, host, port, secure, provider } = req.body;
     const mailboxes = db.getMailboxes();
     const domains = db.getDomains();
 
@@ -1060,14 +1060,17 @@ ${body_html || `<p>${(body_text || 'This is a test inbound email message receive
     const targetPass = (password || db.getSmtpConfig().pass || '').trim();
 
     if (!targetPass) {
-      return res.status(400).json({ error: 'Please provide your email password to complete automatic configuration.' });
+      return res.status(400).json({ error: 'Please provide your email password or SMTP API key to complete configuration.' });
     }
 
-    // Auto-setup with Namecheap Private Email high-reliability settings
+    const selectedHost = (host || (provider === 'gmail' ? 'smtp.gmail.com' : provider === 'brevo' ? 'smtp-relay.brevo.com' : 'mail.privateemail.com')).trim();
+    const selectedPort = port ? Number(port) : (selectedHost === 'smtp-relay.brevo.com' ? 587 : 465);
+    const selectedSecure = secure !== undefined ? Boolean(secure) : (selectedPort === 465);
+
     const autoConfig = {
-      host: 'mail.privateemail.com',
-      port: 465,
-      secure: true,
+      host: selectedHost,
+      port: selectedPort,
+      secure: selectedSecure,
       user: targetEmail,
       pass: targetPass,
       from_name: 'ApexMail Relay',
@@ -1109,7 +1112,7 @@ ${body_html || `<p>${(body_text || 'This is a test inbound email message receive
 
       return res.json({
         success: true,
-        message: 'Mail server configured and verified automatically!',
+        message: `Mail server connected and verified automatically via ${selectedHost}!`,
         config: saved,
         logs: testResult.logs,
       });
@@ -1124,7 +1127,7 @@ ${body_html || `<p>${(body_text || 'This is a test inbound email message receive
 
       return res.status(400).json({
         success: false,
-        error: testResult.error || 'Could not verify password with mail.privateemail.com',
+        error: testResult.error || `Could not verify credentials with ${selectedHost}`,
         logs: testResult.logs,
       });
     }
