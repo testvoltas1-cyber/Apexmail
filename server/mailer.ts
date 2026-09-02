@@ -527,24 +527,55 @@ export async function testSmtpConnection(config: {
       pass: config.pass.trim(),
     } : undefined;
 
-    logs.push(`[${new Date().toLocaleTimeString()}] Establishing TCP socket and handshake with ${host}:${port}...`);
+    logs.push(`[${new Date().toLocaleTimeString()}] Establishing TCP socket and handshake with ${host}:${port} (${isSecure ? 'Direct SSL/TLS' : 'STARTTLS'})...`);
 
-    const transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: isSecure,
-      auth: authConfig,
-      connectionTimeout: 12000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
-      tls: {
-        rejectUnauthorized: false, // Avoid strict cert mismatch errors on custom hostnames
-      },
-    });
+    // Helper to create transport
+    const createTestTransport = (targetPort: number, secureMode: boolean) => {
+      return nodemailer.createTransport({
+        host,
+        port: targetPort,
+        secure: secureMode,
+        auth: authConfig,
+        connectionTimeout: 8000,
+        greetingTimeout: 8000,
+        socketTimeout: 10000,
+        tls: {
+          rejectUnauthorized: false,
+        },
+      });
+    };
 
-    // 1. Test socket handshake and credentials
-    await transporter.verify();
-    logs.push(`✓ Socket handshake and SMTP Authentication successful on ${host}:${port}!`);
+    let transporter = createTestTransport(port, isSecure);
+    let verified = false;
+    let actualPort = port;
+    let actualSecure = isSecure;
+
+    try {
+      await transporter.verify();
+      verified = true;
+      logs.push(`✓ Socket handshake and SMTP Authentication successful on ${host}:${port}!`);
+    } catch (primaryErr: any) {
+      logs.push(`⚠️ Handshake on port ${port} failed (${primaryErr.code || primaryErr.message}).`);
+      
+      // Auto-fallback test between 465 and 587
+      const fallbackPort = port === 465 ? 587 : 465;
+      const fallbackSecure = fallbackPort === 465;
+      logs.push(`[${new Date().toLocaleTimeString()}] Attempting automatic fallback to port ${fallbackPort} (${fallbackSecure ? 'Direct SSL/TLS' : 'STARTTLS'})...`);
+      
+      try {
+        const fallbackTransporter = createTestTransport(fallbackPort, fallbackSecure);
+        await fallbackTransporter.verify();
+        transporter = fallbackTransporter;
+        verified = true;
+        actualPort = fallbackPort;
+        actualSecure = fallbackSecure;
+        logs.push(`✓ Connected successfully on fallback Port ${fallbackPort} (${fallbackSecure ? 'SSL/TLS' : 'STARTTLS'})!`);
+        logs.push(`💡 Tip: Update your SMTP Port to ${fallbackPort} and ${fallbackSecure ? 'Check "Use Direct SSL/TLS"' : 'Uncheck "Use Direct SSL/TLS"'}.`);
+      } catch (fallbackErr: any) {
+        // Both failed, rethrow original error
+        throw primaryErr;
+      }
+    }
 
     // 2. Optionally send a real test email if a recipient address is provided
     let responseText = 'SMTP Connection verified successfully (250 OK)';

@@ -571,14 +571,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {/* Main SMTP Configuration Form */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-6">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-100 pb-4 gap-3">
               <div>
                 <h3 className="font-bold text-sm text-gray-900">Outbound SMTP Relay Settings</h3>
                 <p className="text-xs text-gray-500">Configure the server credentials used to send outbound emails across the internet.</p>
               </div>
 
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-semibold text-gray-700 flex items-center gap-2 cursor-pointer">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => applyPreset('namecheap_private')}
+                  className="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                  <span>Use Namecheap Private Email (Port 465 SSL)</span>
+                </button>
+                <label className="text-xs font-semibold text-gray-700 flex items-center gap-2 cursor-pointer ml-2">
                   <span>Enable Global Relay:</span>
                   <input
                     type="checkbox"
@@ -614,8 +622,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     type="number"
                     required
                     value={smtpConfig.port}
-                    onChange={(e) => setSmtpConfig({ ...smtpConfig, port: Number(e.target.value) })}
-                    placeholder="587 or 465"
+                    onChange={(e) => {
+                      const p = Number(e.target.value);
+                      setSmtpConfig({ 
+                        ...smtpConfig, 
+                        port: p,
+                        secure: p === 465 ? true : p === 587 ? false : smtpConfig.secure 
+                      });
+                    }}
+                    placeholder="465 or 587"
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-500 font-mono"
                   />
                 </div>
@@ -670,12 +685,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <input
                       type="checkbox"
                       checked={smtpConfig.secure}
-                      onChange={(e) => setSmtpConfig({ ...smtpConfig, secure: e.target.checked })}
+                      onChange={(e) => {
+                        const isSec = e.target.checked;
+                        setSmtpConfig({ 
+                          ...smtpConfig, 
+                          secure: isSec,
+                          port: isSec && smtpConfig.port === 587 ? 465 : (!isSec && smtpConfig.port === 465 ? 587 : smtpConfig.port)
+                        });
+                      }}
                       className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500 cursor-pointer"
                     />
                     <div>
                       <span className="font-semibold text-gray-800">Use Direct SSL/TLS (Port 465)</span>
-                      <p className="text-[10px] text-gray-400">Leave unchecked for Port 587 (which auto-upgrades to STARTTLS).</p>
+                      <p className="text-[10px] text-gray-400">Recommended for Namecheap Private Email (Port 465).</p>
                     </div>
                   </label>
                 </div>
