@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # Webmail Application & REST API
+  webmail:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: webmail-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - APP_URL=http://localhost:3000
+      - DATABASE_URL=postgresql://webmail_user:webmail_secure_pass@postgres:5432/webmail_db
+      - DB_TYPE=postgres
+      - JWT_SECRET=change-this-to-a-very-secure-random-string-in-production
+      - STORAGE_TYPE=local
+      - STORAGE_DIR=/app/uploads
+      # Set your Gemini API Key if using AI features
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - webmail_uploads:/app/uploads
+      - webmail_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: webmail-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=webmail_user
+      - POSTGRES_PASSWORD=webmail_secure_pass
+      - POSTGRES_DB=webmail_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U webmail_user -d webmail_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Optional Local SMTP Sandbox for testing delivery without touching public relays
+  maildev:
+    image: maildev/maildev:2.1.0
+    container_name: webmail-maildev
+    restart: unless-stopped
+    ports:
+      - "1080:1080" # Web UI
+      - "1025:1025" # SMTP Port
+    profiles:
+      - dev
+
+volumes:
+  webmail_uploads:
+  webmail_data:
+  pgdata:

@@ -1,0 +1,6 @@
+{
+  "name": "Custom Domain Webmail",
+  "description": "A full-featured, Gmail-style webmail platform with custom domain hosting, MX/SPF/DKIM/DMARC verification, SMTP/IMAP bridge, outbox queue, multi-mailbox support, and admin dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
