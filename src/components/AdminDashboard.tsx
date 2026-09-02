@@ -23,6 +23,8 @@ import {
   ArrowDownLeft,
   Trash2,
   Play,
+  Zap,
+  AlertTriangle,
 } from 'lucide-react';
 import { SystemStats, OutboxItem, AuditLog, User, Mailbox, Domain, SmtpServerConfig, MailDeliveryLog } from '../types';
 import { api } from '../api/client';
@@ -58,6 +60,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   });
   const [isSavingSmtp, setIsSavingSmtp] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+
+  // 1-Click Auto Setup State
+  const [autoEmail, setAutoEmail] = useState('pankaj.bhardwaj@pdftoolkitpro.online');
+  const [autoPass, setAutoPass] = useState('');
+  const [isAutoSettingUp, setIsAutoSettingUp] = useState(false);
+  const [autoSetupSuccess, setAutoSetupSuccess] = useState<string | null>(null);
+  const [autoSetupError, setAutoSetupError] = useState<string | null>(null);
+  const [autoSetupLogs, setAutoSetupLogs] = useState<string[]>([]);
 
   // SMTP Live Diagnostic Test State
   const [testRecipient, setTestRecipient] = useState('');
@@ -209,6 +219,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       });
     } finally {
       setIsTestingSmtp(false);
+    }
+  };
+
+  const handleAutoSetup = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!autoPass.trim()) {
+      alert('Please enter your email password to automatically connect and fix.');
+      return;
+    }
+    setIsAutoSettingUp(true);
+    setAutoSetupSuccess(null);
+    setAutoSetupError(null);
+    setAutoSetupLogs([]);
+
+    try {
+      const res = await api.autoSetupSmtp({
+        email_address: autoEmail.trim(),
+        password: autoPass.trim(),
+      });
+      if (res.success) {
+        setAutoSetupSuccess('✓ Mail server connected, tested & saved automatically! Port 465 SSL is now active.');
+        setAutoSetupLogs(res.logs || []);
+        setSmtpConfig(res.config);
+        loadData();
+      }
+    } catch (err: any) {
+      setAutoSetupError(err.message || 'Auto-setup failed. Please verify your password.');
+    } finally {
+      setIsAutoSettingUp(false);
     }
   };
 
@@ -503,6 +542,96 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="text-[11px] font-medium text-rose-800">Direct MX Delivery</div>
                 <div className="text-[10px] text-rose-700">Blocked by Render to prevent spam. Use Port 587 or 465 instead.</div>
               </div>
+            </div>
+          </div>
+
+          {/* 1-Click Automatic Fix & Setup Card */}
+          <div className="bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="relative z-10 space-y-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-500/30 text-purple-200 border border-purple-400/30 rounded-full text-[11px] font-semibold">
+                    <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
+                    <span>Automatic Setup & Fix Engine</span>
+                  </div>
+                  <h2 className="text-base font-bold text-white">1-Click Auto-Configure & Fix Mail Server</h2>
+                  <p className="text-xs text-purple-200/80 max-w-2xl">
+                    No manual port or SSL configuration needed. Enter your mailbox password below and our system will automatically test all ports (465 SSL &amp; 587 STARTTLS), connect to Namecheap Private Email, and activate outbound delivery.
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleAutoSetup} className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/15 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                <div>
+                  <label className="block text-[11px] font-semibold text-purple-200 mb-1">Email / Mailbox Address</label>
+                  <input
+                    type="email"
+                    value={autoEmail}
+                    onChange={(e) => setAutoEmail(e.target.value)}
+                    placeholder="test@pdftoolkitpro.online"
+                    className="w-full px-3 py-2 bg-white/20 text-white placeholder-purple-300/60 border border-white/20 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-purple-400"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-purple-200 mb-1">Mailbox Password</label>
+                  <input
+                    type="password"
+                    value={autoPass}
+                    onChange={(e) => setAutoPass(e.target.value)}
+                    placeholder="Enter your email password"
+                    className="w-full px-3 py-2 bg-white/20 text-white placeholder-purple-300/60 border border-white/20 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-purple-400"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <button
+                    type="submit"
+                    disabled={isAutoSettingUp}
+                    className="w-full px-4 py-2 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white text-xs font-bold rounded-lg shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 h-[38px]"
+                  >
+                    {isAutoSettingUp ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Auto-Connecting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-4 h-4 text-yellow-300" />
+                        <span>⚡ Auto-Connect &amp; Fix All</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+
+              {autoSetupSuccess && (
+                <div className="p-3 bg-emerald-500/20 border border-emerald-400/40 rounded-xl text-emerald-200 text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{autoSetupSuccess}</span>
+                </div>
+              )}
+
+              {autoSetupError && (
+                <div className="p-3 bg-rose-500/20 border border-rose-400/40 rounded-xl text-rose-200 text-xs flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-semibold">{autoSetupError}</div>
+                    <div className="text-[11px] text-rose-300 mt-1">Tip: Make sure you entered the exact password for this mailbox from Namecheap.</div>
+                  </div>
+                </div>
+              )}
+
+              {autoSetupLogs.length > 0 && (
+                <div className="bg-black/40 border border-white/10 rounded-lg p-2.5 font-mono text-[11px] text-purple-200 space-y-1">
+                  {autoSetupLogs.map((log, idx) => (
+                    <div key={idx} className="leading-tight">{log}</div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

@@ -545,36 +545,72 @@ export async function testSmtpConnection(config: {
       });
     };
 
-    let transporter = createTestTransport(port, isSecure);
-    let verified = false;
+    let transporter: nodemailer.Transporter | null = null;
+    let actualHost = host;
     let actualPort = port;
     let actualSecure = isSecure;
 
     try {
+      transporter = createTestTransport(actualPort, actualSecure);
       await transporter.verify();
-      verified = true;
-      logs.push(`✓ Socket handshake and SMTP Authentication successful on ${host}:${port}!`);
+      logs.push(`✓ Socket handshake and SMTP Authentication successful on ${actualHost}:${actualPort}!`);
     } catch (primaryErr: any) {
-      logs.push(`⚠️ Handshake on port ${port} failed (${primaryErr.code || primaryErr.message}).`);
+      logs.push(`⚠️ Attempt on ${actualHost}:${actualPort} failed (${primaryErr.code || primaryErr.message}).`);
       
-      // Auto-fallback test between 465 and 587
-      const fallbackPort = port === 465 ? 587 : 465;
-      const fallbackSecure = fallbackPort === 465;
-      logs.push(`[${new Date().toLocaleTimeString()}] Attempting automatic fallback to port ${fallbackPort} (${fallbackSecure ? 'Direct SSL/TLS' : 'STARTTLS'})...`);
-      
-      try {
-        const fallbackTransporter = createTestTransport(fallbackPort, fallbackSecure);
-        await fallbackTransporter.verify();
-        transporter = fallbackTransporter;
-        verified = true;
-        actualPort = fallbackPort;
-        actualSecure = fallbackSecure;
-        logs.push(`✓ Connected successfully on fallback Port ${fallbackPort} (${fallbackSecure ? 'SSL/TLS' : 'STARTTLS'})!`);
-        logs.push(`💡 Tip: Update your SMTP Port to ${fallbackPort} and ${fallbackSecure ? 'Check "Use Direct SSL/TLS"' : 'Uncheck "Use Direct SSL/TLS"'}.`);
-      } catch (fallbackErr: any) {
-        // Both failed, rethrow original error
-        throw primaryErr;
+      let recovered = false;
+
+      // Auto-fallback 1: If host fails DNS or is custom 'mail.domain.online', try Namecheap 'mail.privateemail.com' on 465
+      if (!actualHost.includes('privateemail.com') && (primaryErr.code === 'ENOTFOUND' || primaryErr.code === 'EDNS' || primaryErr.code === 'ETIMEDOUT')) {
+        logs.push(`[${new Date().toLocaleTimeString()}] Auto-Fix: Trying Namecheap Private Email relay "mail.privateemail.com" on Port 465 (SSL)...`);
+        try {
+          const peTransport = nodemailer.createTransport({
+            host: 'mail.privateemail.com',
+            port: 465,
+            secure: true,
+            auth: authConfig,
+            connectionTimeout: 8000,
+            greetingTimeout: 8000,
+            socketTimeout: 10000,
+            tls: { rejectUnauthorized: false },
+          });
+          await peTransport.verify();
+          transporter = peTransport;
+          actualHost = 'mail.privateemail.com';
+          actualPort = 465;
+          actualSecure = true;
+          recovered = true;
+          logs.push(`✓ Auto-Fix Succeeded: Connected to mail.privateemail.com:465 (SSL)!`);
+        } catch {}
       }
+
+      // Auto-fallback 2: Try alternate port (465 SSL vs 587 STARTTLS)
+      if (!recovered) {
+        const fallbackPort = actualPort === 465 ? 587 : 465;
+        const fallbackSecure = fallbackPort === 465;
+        logs.push(`[${new Date().toLocaleTimeString()}] Auto-Fix: Attempting automatic fallback to port ${fallbackPort} (${fallbackSecure ? 'Direct SSL/TLS' : 'STARTTLS'})...`);
+        
+        try {
+          const fallbackTransporter = createTestTransport(fallbackPort, fallbackSecure);
+          await fallbackTransporter.verify();
+          transporter = fallbackTransporter;
+          actualPort = fallbackPort;
+          actualSecure = fallbackSecure;
+          recovered = true;
+          logs.push(`✓ Connected successfully on fallback Port ${fallbackPort} (${fallbackSecure ? 'SSL/TLS' : 'STARTTLS'})!`);
+        } catch (fallbackErr: any) {
+          if (!recovered) throw primaryErr;
+        }
+      }
+    }
+
+    // Auto-update database config to working settings so user doesn't have to fiddle
+    if (actualHost !== host || actualPort !== port || actualSecure !== isSecure) {
+      db.updateSmtpConfig({
+        host: actualHost,
+        port: actualPort,
+        secure: actualSecure,
+      });
+      logs.push(`✓ Saved working configuration (${actualHost}:${actualPort} SSL=${actualSecure}) to database.`);
     }
 
     // 2. Optionally send a real test email if a recipient address is provided
@@ -795,8 +831,43 @@ export async function sendEmailDirectOrRelay(email: Email, mailbox: Mailbox, dom
         })),
       };
 
-      const info = await transporter.sendMail(mailOptions);
-      messageIdResult = info.messageId || email.message_id;
+      try {
+        const info = await transporter.sendMail(mailOptions);
+        messageIdResult = info.messageId || email.message_id;
+      } catch (sendErr: any) {
+        // Automatic fallback on send failure (e.g. port 587 timeout)
+        console.warn(`[SMTP Outbound] Primary send failed (${sendErr.code || sendErr.message}), attempting fallback to mail.privateemail.com:465 (SSL)...`);
+        
+        const authInfo = domain?.custom_smtp_user ? {
+          user: domain.custom_smtp_user,
+          pass: domain.custom_smtp_pass,
+        } : (globalSmtp?.user ? {
+          user: globalSmtp.user,
+          pass: globalSmtp.pass,
+        } : undefined);
+
+        if (authInfo) {
+          const fallbackTransporter = nodemailer.createTransport({
+            host: 'mail.privateemail.com',
+            port: 465,
+            secure: true,
+            auth: authInfo,
+            dkim: dkimConfig,
+            tls: { rejectUnauthorized: false },
+            connectionTimeout: 10000,
+            greetingTimeout: 10000,
+            socketTimeout: 15000,
+          });
+
+          const fbInfo = await fallbackTransporter.sendMail(mailOptions);
+          messageIdResult = fbInfo.messageId || email.message_id;
+          usedHost = 'mail.privateemail.com';
+          usedPort = 465;
+          usedTls = 'SSL/TLS';
+        } else {
+          throw sendErr;
+        }
+      }
     }
 
     // 4. Deliver local internal copies to internal recipient mailboxes

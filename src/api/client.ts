@@ -314,6 +314,13 @@ export const api = {
     });
   },
 
+  async autoSetupSmtp(payload: { email_address?: string; password: string }): Promise<{ success: boolean; message: string; config: SmtpServerConfig; logs: string[] }> {
+    return apiFetch<{ success: boolean; message: string; config: SmtpServerConfig; logs: string[] }>('/api/admin/smtp/auto-setup', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
   async getMailDeliveryLogs(params: { status?: string; direction?: string; q?: string; limit?: number } = {}): Promise<{ logs: MailDeliveryLog[]; count: number }> {
     const query = new URLSearchParams();
     if (params.status) query.set('status', params.status);
