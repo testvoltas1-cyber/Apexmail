@@ -16,6 +16,7 @@ import {
   generateDkimKeyPair,
   verifyDomainDns,
   sendEmailDirectOrRelay,
+  validateAndVerifyRecipients,
   processInboundEmailStream,
   startOutboxWorker,
   calculateSpamScore,
@@ -570,8 +571,24 @@ async function startServer() {
       return res.status(400).json({ error: 'Please select a sending mailbox' });
     }
 
-    if (!to_addresses || to_addresses.length === 0) {
+    const toList = Array.isArray(to_addresses) ? to_addresses : (to_addresses ? [{ address: to_addresses }] : []);
+    const ccList = Array.isArray(cc_addresses) ? cc_addresses : (cc_addresses ? [{ address: cc_addresses }] : []);
+    const bccList = Array.isArray(bcc_addresses) ? bcc_addresses : (bcc_addresses ? [{ address: bcc_addresses }] : []);
+
+    if (toList.length === 0) {
       return res.status(400).json({ error: 'At least one recipient address is required' });
+    }
+
+    const allRecipientStrings = [
+      ...toList.map((a: any) => typeof a === 'string' ? a : a?.address),
+      ...ccList.map((a: any) => typeof a === 'string' ? a : a?.address),
+      ...bccList.map((a: any) => typeof a === 'string' ? a : a?.address),
+    ].filter(Boolean);
+
+    // 1. Strict recipient format & DNS validation to reject fake / invalid emails immediately
+    const validation = await validateAndVerifyRecipients(allRecipientStrings);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error || 'Invalid recipient address' });
     }
 
     const mailbox = db.getMailboxById(mailbox_id);
@@ -594,10 +611,10 @@ async function startServer() {
       folder: 'sent',
       from_address: mailbox.address,
       from_name: mailbox.display_name,
-      to_addresses: Array.isArray(to_addresses) ? to_addresses : [{ address: to_addresses }],
-      cc_addresses: Array.isArray(cc_addresses) ? cc_addresses : (cc_addresses ? [{ address: cc_addresses }] : []),
-      bcc_addresses: Array.isArray(bcc_addresses) ? bcc_addresses : (bcc_addresses ? [{ address: bcc_addresses }] : []),
-      subject: subject.trim(),
+      to_addresses: toList,
+      cc_addresses: ccList,
+      bcc_addresses: bccList,
+      subject: (subject || '(No Subject)').trim(),
       body_text: body_text || body_html.replace(/<[^>]*>?/gm, ''),
       body_html: body_html || `<p>${body_text.replace(/\n/g, '<br/>')}</p>`,
       snippet,
@@ -617,30 +634,27 @@ async function startServer() {
       created_at: new Date().toISOString(),
     };
 
-    db.createEmail(sentEmail);
-
-    // Add to outbox queue for background dispatch and persistent tracking
-    const outboxItem: OutboxItem = {
-      id: uuidv4(),
-      user_id: req.user!.id,
-      mailbox_id: mailbox.id,
-      email_id: sentEmail.id,
-      status: 'sending',
-      attempts: 1,
-      max_attempts: 5,
-      next_retry_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-    };
-    db.addOutboxItem(outboxItem);
-
-    // Attempt direct dispatch
+    // 2. Dispatch email (via SMTP Relay or local routing)
     const result = await sendEmailDirectOrRelay(sentEmail, mailbox, domain);
 
     if (result.success) {
-      db.updateOutboxItem(outboxItem.id, {
+      // Save sent email in database
+      db.createEmail(sentEmail);
+
+      const outboxItem: OutboxItem = {
+        id: uuidv4(),
+        user_id: req.user!.id,
+        mailbox_id: mailbox.id,
+        email_id: sentEmail.id,
         status: 'sent',
+        attempts: 1,
+        max_attempts: 5,
+        next_retry_at: new Date().toISOString(),
         sent_at: new Date().toISOString(),
-      });
+        created_at: new Date().toISOString(),
+      };
+      db.addOutboxItem(outboxItem);
+
       db.logAction('EMAIL_SENT', {
         to: sentEmail.to_addresses,
         subject: sentEmail.subject,
@@ -648,18 +662,11 @@ async function startServer() {
         mailbox: mailbox.address,
       }, req.user!.id, req.ip);
 
-      res.status(201).json({ success: true, email: sentEmail, outbox: outboxItem });
+      return res.status(201).json({ success: true, email: sentEmail, outbox: outboxItem });
     } else {
-      db.updateOutboxItem(outboxItem.id, {
-        status: 'queued',
-        last_error: result.error,
-        next_retry_at: new Date(Date.now() + 30000).toISOString(),
-      });
-      res.status(201).json({
-        success: true,
-        queued: true,
-        email: sentEmail,
-        warning: 'Email accepted and queued for retry in outbox.',
+      // Delivery failed (SMTP rejected, fake address, no SMTP configured, etc.) -> Return clear error
+      return res.status(400).json({
+        error: result.error || 'Failed to dispatch email via mail server.',
       });
     }
   });

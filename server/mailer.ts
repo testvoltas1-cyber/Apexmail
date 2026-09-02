@@ -256,6 +256,117 @@ export interface SmtpTestResult {
   response?: string;
 }
 
+export async function validateAndVerifyRecipients(addresses: string[]): Promise<{
+  valid: boolean;
+  error?: string;
+  externalAddresses: string[];
+  internalAddresses: string[];
+}> {
+  const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+  const externalAddresses: string[] = [];
+  const internalAddresses: string[] = [];
+
+  if (!addresses || addresses.length === 0) {
+    return { valid: false, error: 'At least one recipient address is required', externalAddresses: [], internalAddresses: [] };
+  }
+
+  for (const rawAddr of addresses) {
+    const addr = (rawAddr || '').trim().toLowerCase();
+    if (!addr) continue;
+
+    // 1. Syntax check
+    if (!emailRegex.test(addr)) {
+      return {
+        valid: false,
+        error: `Invalid email address format: "${rawAddr}". Please provide a valid email (e.g. user@example.com).`,
+        externalAddresses: [],
+        internalAddresses: [],
+      };
+    }
+
+    const domainPart = addr.split('@')[1];
+    if (!domainPart || domainPart.includes('..') || domainPart.startsWith('-') || domainPart.endsWith('-') || !domainPart.includes('.')) {
+      return {
+        valid: false,
+        error: `Invalid domain in email address: "${rawAddr}".`,
+        externalAddresses: [],
+        internalAddresses: [],
+      };
+    }
+
+    // Check if domain is registered locally in this mail server instance
+    const localDomain = db.getDomainByName(domainPart);
+    const localMailbox = db.getMailboxByAddress(addr);
+
+    if (localDomain || localMailbox) {
+      internalAddresses.push(addr);
+    } else {
+      externalAddresses.push(addr);
+
+      // 2. DNS MX / A record check for external domain to detect fake/non-existent domains
+      try {
+        const mxRecords = await publicResolver.resolveMx(domainPart);
+        if (!mxRecords || mxRecords.length === 0) {
+          // Fallback: check if domain has A record
+          try {
+            const aRecords = await publicResolver.resolve4(domainPart);
+            if (!aRecords || aRecords.length === 0) {
+              return {
+                valid: false,
+                error: `Fake or non-existent recipient domain: "${domainPart}". No MX mail exchange or A records found in DNS for "${addr}".`,
+                externalAddresses: [],
+                internalAddresses: [],
+              };
+            }
+          } catch {
+            return {
+              valid: false,
+              error: `Recipient domain "${domainPart}" does not exist or has no active mail server (MX). Cannot send email to "${addr}".`,
+              externalAddresses: [],
+              internalAddresses: [],
+            };
+          }
+        }
+      } catch (err: any) {
+        const code = err.code || err.message;
+        if (code === 'ENOTFOUND' || code === 'ENODATA' || code === 'SERVFAIL') {
+          return {
+            valid: false,
+            error: `Fake or invalid recipient domain: "${domainPart}". Domain was not found in public DNS.`,
+            externalAddresses: [],
+            internalAddresses: [],
+          };
+        }
+        // If timeout or other network error, also check A record
+        try {
+          const aRecords = await publicResolver.resolve4(domainPart);
+          if (!aRecords || aRecords.length === 0) {
+            return {
+              valid: false,
+              error: `Could not resolve mail servers for domain "${domainPart}".`,
+              externalAddresses: [],
+              internalAddresses: [],
+            };
+          }
+        } catch {
+          return {
+            valid: false,
+            error: `Recipient domain "${domainPart}" cannot receive emails (DNS resolution failed: ${code}).`,
+            externalAddresses: [],
+            internalAddresses: [],
+          };
+        }
+      }
+    }
+  }
+
+  return {
+    valid: true,
+    externalAddresses,
+    internalAddresses,
+  };
+}
+
 export async function testSmtpConnection(config: {
   host: string;
   port: number;
@@ -381,6 +492,25 @@ export async function sendEmailDirectOrRelay(email: Email, mailbox: Mailbox, dom
   let usedPort = 587;
   let usedTls = 'STARTTLS';
 
+  const allAddresses = [
+    ...email.to_addresses.map(a => a.address),
+    ...email.cc_addresses.map(a => a.address),
+    ...email.bcc_addresses.map(a => a.address),
+  ];
+
+  const externalRecipients: string[] = [];
+  const internalRecipients: string[] = [];
+
+  for (const addr of allAddresses) {
+    const cleanAddr = (addr || '').trim().toLowerCase();
+    const domainPart = cleanAddr.split('@')[1];
+    if (domainPart && (db.getDomainByName(domainPart) || db.getMailboxByAddress(cleanAddr))) {
+      internalRecipients.push(cleanAddr);
+    } else {
+      externalRecipients.push(cleanAddr);
+    }
+  }
+
   try {
     // 1. Prepare DKIM configuration if private key exists
     let dkimConfig: any = undefined;
@@ -392,8 +522,8 @@ export async function sendEmailDirectOrRelay(email: Email, mailbox: Mailbox, dom
       };
     }
 
-    // 2. Determine SMTP Relay: Domain Specific -> Global Database Config -> Environment Variable -> Direct Fallback
-    let transporter: nodemailer.Transporter;
+    // 2. Determine SMTP Relay: Domain Specific -> Global Database Config -> Environment Variable
+    let transporter: nodemailer.Transporter | null = null;
     const globalSmtp = db.getSmtpConfig();
 
     if (domain && domain.custom_smtp_host && domain.custom_smtp_user && domain.custom_smtp_pass) {
@@ -412,6 +542,9 @@ export async function sendEmailDirectOrRelay(email: Email, mailbox: Mailbox, dom
         },
         dkim: dkimConfig,
         tls: { rejectUnauthorized: false },
+        connectionTimeout: 12000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000,
       });
     } else if (globalSmtp && globalSmtp.is_active && globalSmtp.host && globalSmtp.user) {
       // Global database-configured relay
@@ -429,6 +562,9 @@ export async function sendEmailDirectOrRelay(email: Email, mailbox: Mailbox, dom
         },
         dkim: dkimConfig,
         tls: { rejectUnauthorized: false },
+        connectionTimeout: 12000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000,
       });
     } else if (process.env.SMTP_DEFAULT_HOST && process.env.SMTP_DEFAULT_USER) {
       // Environment-configured relay
@@ -446,46 +582,107 @@ export async function sendEmailDirectOrRelay(email: Email, mailbox: Mailbox, dom
         },
         dkim: dkimConfig,
         tls: { rejectUnauthorized: false },
-      });
-    } else {
-      // Real direct delivery buffer mode with DKIM signing
-      usedHost = 'Local Mail Engine';
-      usedPort = 587;
-      usedTls = 'DKIM-Signed Stream';
-
-      transporter = nodemailer.createTransport({
-        streamTransport: true,
-        newline: 'unix',
-        buffer: true,
-        dkim: dkimConfig,
+        connectionTimeout: 12000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000,
       });
     }
 
-    // Format recipients
-    const to = email.to_addresses.map(a => a.name ? `"${a.name}" <${a.address}>` : a.address).join(', ');
-    const cc = email.cc_addresses.length > 0 ? email.cc_addresses.map(a => a.name ? `"${a.name}" <${a.address}>` : a.address).join(', ') : undefined;
-    const bcc = email.bcc_addresses.length > 0 ? email.bcc_addresses.map(a => a.name ? `"${a.name}" <${a.address}>` : a.address).join(', ') : undefined;
+    // If sending to external recipients, an active SMTP Relay MUST be configured
+    if (externalRecipients.length > 0 && !transporter) {
+      const errorExplanation = `Cannot deliver to external recipient(s) [${externalRecipients.join(', ')}]. No outbound SMTP Relay is configured. Please configure your SMTP server (e.g. Namecheap Private Email, Brevo, SendGrid, etc.) in Admin Dashboard > Mail Server & SMTP Relay.`;
 
-    const fromFormatted = mailbox.display_name ? `"${mailbox.display_name}" <${mailbox.address}>` : mailbox.address;
+      db.addDeliveryLog({
+        email_id: email.id,
+        mailbox_address: mailbox.address,
+        to_addresses: toAddressesList,
+        subject: email.subject,
+        direction: 'outbound',
+        status: 'failed',
+        smtp_host: 'No Relay Configured',
+        smtp_port: 587,
+        tls_type: 'None',
+        response_code: 'NO_SMTP_RELAY',
+        response_message: 'Outbound SMTP relay required for external internet delivery',
+        error_reason: errorExplanation,
+        duration_ms: Date.now() - startTime,
+      });
 
-    const mailOptions: nodemailer.SendMailOptions = {
-      from: fromFormatted,
-      to,
-      cc,
-      bcc,
-      subject: email.subject,
-      text: email.body_text,
-      html: email.body_html || `<p>${email.body_text.replace(/\n/g, '<br/>')}</p>`,
-      messageId: email.message_id,
-      inReplyTo: email.in_reply_to,
-      references: email.references_header,
-      attachments: email.attachments.map(att => ({
-        filename: att.filename,
-        path: att.path || att.url,
-      })),
-    };
+      return {
+        success: false,
+        error: errorExplanation,
+      };
+    }
 
-    const info = await transporter.sendMail(mailOptions);
+    let messageIdResult = email.message_id;
+
+    // 3. Dispatch external email via SMTP relay
+    if (transporter) {
+      const to = email.to_addresses.map(a => a.name ? `"${a.name}" <${a.address}>` : a.address).join(', ');
+      const cc = email.cc_addresses.length > 0 ? email.cc_addresses.map(a => a.name ? `"${a.name}" <${a.address}>` : a.address).join(', ') : undefined;
+      const bcc = email.bcc_addresses.length > 0 ? email.bcc_addresses.map(a => a.name ? `"${a.name}" <${a.address}>` : a.address).join(', ') : undefined;
+
+      const fromFormatted = mailbox.display_name ? `"${mailbox.display_name}" <${mailbox.address}>` : mailbox.address;
+
+      const mailOptions: nodemailer.SendMailOptions = {
+        from: fromFormatted,
+        to,
+        cc,
+        bcc,
+        subject: email.subject,
+        text: email.body_text,
+        html: email.body_html || `<p>${email.body_text.replace(/\n/g, '<br/>')}</p>`,
+        messageId: email.message_id,
+        inReplyTo: email.in_reply_to,
+        references: email.references_header,
+        attachments: email.attachments.map(att => ({
+          filename: att.filename,
+          path: att.path || att.url,
+        })),
+      };
+
+      const info = await transporter.sendMail(mailOptions);
+      messageIdResult = info.messageId || email.message_id;
+    }
+
+    // 4. Deliver local internal copies to internal recipient mailboxes
+    for (const intAddr of internalRecipients) {
+      const recipientMb = db.getMailboxByAddress(intAddr);
+      if (recipientMb && recipientMb.id !== mailbox.id) {
+        const inboxEmail: Email = {
+          id: uuidv4(),
+          mailbox_id: recipientMb.id,
+          user_id: recipientMb.user_id,
+          thread_id: email.thread_id,
+          folder: 'inbox',
+          from_address: mailbox.address,
+          from_name: mailbox.display_name,
+          to_addresses: email.to_addresses,
+          cc_addresses: email.cc_addresses,
+          bcc_addresses: [],
+          subject: email.subject,
+          body_text: email.body_text,
+          body_html: email.body_html,
+          snippet: email.snippet,
+          is_read: false,
+          is_starred: false,
+          is_pinned: false,
+          labels: [],
+          attachments: email.attachments,
+          message_id: email.message_id,
+          in_reply_to: email.in_reply_to,
+          spam_score: 0,
+          spam_reasons: [],
+          dkim_verified: true,
+          spf_verified: true,
+          size_bytes: email.size_bytes,
+          received_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+        };
+        db.createEmail(inboxEmail);
+      }
+    }
+
     const duration = Date.now() - startTime;
 
     // Record positive delivery log
@@ -496,18 +693,18 @@ export async function sendEmailDirectOrRelay(email: Email, mailbox: Mailbox, dom
       subject: email.subject,
       direction: 'outbound',
       status: 'delivered',
-      smtp_host: usedHost,
-      smtp_port: usedPort,
-      tls_type: usedTls,
+      smtp_host: transporter ? usedHost : 'Internal Router',
+      smtp_port: transporter ? usedPort : 25,
+      tls_type: transporter ? usedTls : 'Local Delivery',
       response_code: '250',
-      response_message: String(info.response || info.messageId || '250 OK: Message accepted for delivery'),
+      response_message: `250 OK: Email dispatched successfully to ${toAddressesList.join(', ')}`,
       duration_ms: duration,
     });
 
     console.log(`[SMTP Outbound] Email ${email.id} sent successfully via ${usedHost}:${usedPort}. Duration: ${duration}ms`);
     return {
       success: true,
-      messageId: info.messageId || email.message_id,
+      messageId: messageIdResult,
     };
   } catch (err: any) {
     const duration = Date.now() - startTime;

@@ -21,7 +21,8 @@ import {
   Check,
   Clock,
   File,
-  FileText
+  FileText,
+  AlertCircle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Mailbox, Contact, Email } from '../types';
@@ -70,14 +71,18 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({
 
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [sendErrorMessage, setSendErrorMessage] = useState<string | null>(null);
   const [draftStatus, setDraftStatus] = useState<string>('Draft saved');
   const [draftId, setDraftId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const isValidEmailFormat = (email: string) => /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/.test(email);
+
   // Initialize data
   useEffect(() => {
     if (isOpen) {
+      setSendErrorMessage(null);
       const defaultMb = activeMailbox || mailboxes.find((m) => m.is_default) || mailboxes[0];
       if (defaultMb) setSelectedMailboxId(defaultMb.id);
 
@@ -94,6 +99,7 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({
   const handleAddRecipient = (type: 'to' | 'cc' | 'bcc', rawValue: string) => {
     const email = rawValue.trim().replace(/,$/, '');
     if (!email) return;
+    setSendErrorMessage(null);
     if (type === 'to') setToPills([...toPills, email]);
     if (type === 'cc') setCcPills([...ccPills, email]);
     if (type === 'bcc') setBccPills([...bccPills, email]);
@@ -116,7 +122,7 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({
       const res = await api.uploadAttachments(Array.from(files));
       setAttachments([...attachments, ...res.attachments]);
     } catch (err: any) {
-      alert(`Failed to upload: ${err.message}`);
+      setSendErrorMessage(`Failed to upload attachment: ${err.message}`);
     } finally {
       setIsUploading(false);
     }
@@ -136,16 +142,27 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({
   };
 
   const handleSend = async () => {
+    setSendErrorMessage(null);
     if (toPills.length === 0 && !toInput.trim()) {
-      alert('Please enter at least one recipient address.');
+      setSendErrorMessage('Please enter at least one recipient address.');
       return;
     }
 
     const allTo = [...toPills];
-    if (toInput.trim()) allTo.push(toInput.trim());
+    if (toInput.trim()) {
+      allTo.push(toInput.trim());
+    }
+
+    // Check for syntax errors in recipient list before sending
+    for (const addr of [...allTo, ...ccPills, ...bccPills]) {
+      if (!isValidEmailFormat(addr)) {
+        setSendErrorMessage(`Invalid email format: "${addr}". Please provide a valid address like user@domain.com.`);
+        return;
+      }
+    }
 
     if (!selectedMailboxId) {
-      alert('Please select a sending mailbox.');
+      setSendErrorMessage('Please select a sending mailbox.');
       return;
     }
 
@@ -181,7 +198,7 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({
       onEmailSent(res.email);
       onClose();
     } catch (err: any) {
-      alert(`Failed to send email: ${err.message}`);
+      setSendErrorMessage(err.message || 'Failed to send email. Please check the recipient address or SMTP configuration.');
     } finally {
       setIsSending(false);
     }
@@ -248,6 +265,26 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({
         </div>
       </div>
 
+      {/* Error Alert Banner */}
+      {sendErrorMessage && (
+        <div className="mx-4 mt-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-start justify-between gap-3 text-xs text-red-800 animate-fadeIn">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+            <div className="space-y-0.5">
+              <p className="font-bold text-red-900">Email Delivery Prevented</p>
+              <p className="text-red-700 leading-relaxed">{sendErrorMessage}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setSendErrorMessage(null)}
+            className="text-red-400 hover:text-red-700 p-0.5 rounded"
+            title="Dismiss"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* From Selector */}
       <div className="px-4 py-2 border-b border-gray-100 flex items-center gap-2 text-xs">
         <span className="text-gray-500 font-medium w-12">From:</span>
@@ -267,20 +304,27 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({
       {/* Recipients: To */}
       <div className="px-4 py-2 border-b border-gray-100 flex flex-wrap items-center gap-1.5 text-xs">
         <span className="text-gray-500 font-medium w-12">To:</span>
-        {toPills.map((addr, idx) => (
-          <span
-            key={idx}
-            className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-blue-50 text-blue-800 border border-blue-200 rounded-full font-medium"
-          >
-            <span>{addr}</span>
-            <button
-              onClick={() => setToPills(toPills.filter((_, i) => i !== idx))}
-              className="hover:text-red-600"
+        {toPills.map((addr, idx) => {
+          const isValid = isValidEmailFormat(addr);
+          return (
+            <span
+              key={idx}
+              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-medium ${
+                isValid
+                  ? 'bg-blue-50 text-blue-800 border border-blue-200'
+                  : 'bg-red-50 text-red-800 border border-red-300'
+              }`}
             >
-              <X className="w-3 h-3" />
-            </button>
-          </span>
-        ))}
+              <span>{addr}</span>
+              <button
+                onClick={() => setToPills(toPills.filter((_, i) => i !== idx))}
+                className="hover:text-red-600"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          );
+        })}
         <input
           type="text"
           value={toInput}
@@ -313,17 +357,24 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({
       {showCc && (
         <div className="px-4 py-2 border-b border-gray-100 flex flex-wrap items-center gap-1.5 text-xs">
           <span className="text-gray-500 font-medium w-12">Cc:</span>
-          {ccPills.map((addr, idx) => (
-            <span
-              key={idx}
-              className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-gray-100 text-gray-800 rounded-full"
-            >
-              <span>{addr}</span>
-              <button onClick={() => setCcPills(ccPills.filter((_, i) => i !== idx))}>
-                <X className="w-3 h-3" />
-              </button>
-            </span>
-          ))}
+          {ccPills.map((addr, idx) => {
+            const isValid = isValidEmailFormat(addr);
+            return (
+              <span
+                key={idx}
+                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-medium ${
+                  isValid
+                    ? 'bg-gray-100 text-gray-800'
+                    : 'bg-red-50 text-red-800 border border-red-300'
+                }`}
+              >
+                <span>{addr}</span>
+                <button onClick={() => setCcPills(ccPills.filter((_, i) => i !== idx))}>
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            );
+          })}
           <input
             type="text"
             onKeyDown={(e) => handleKeyDownRecipient(e, 'cc')}
@@ -337,17 +388,24 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({
       {showBcc && (
         <div className="px-4 py-2 border-b border-gray-100 flex flex-wrap items-center gap-1.5 text-xs">
           <span className="text-gray-500 font-medium w-12">Bcc:</span>
-          {bccPills.map((addr, idx) => (
-            <span
-              key={idx}
-              className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-gray-100 text-gray-800 rounded-full"
-            >
-              <span>{addr}</span>
-              <button onClick={() => setBccPills(bccPills.filter((_, i) => i !== idx))}>
-                <X className="w-3 h-3" />
-              </button>
-            </span>
-          ))}
+          {bccPills.map((addr, idx) => {
+            const isValid = isValidEmailFormat(addr);
+            return (
+              <span
+                key={idx}
+                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-medium ${
+                  isValid
+                    ? 'bg-gray-100 text-gray-800'
+                    : 'bg-red-50 text-red-800 border border-red-300'
+                }`}
+              >
+                <span>{addr}</span>
+                <button onClick={() => setBccPills(bccPills.filter((_, i) => i !== idx))}>
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            );
+          })}
           <input
             type="text"
             onKeyDown={(e) => handleKeyDownRecipient(e, 'bcc')}
