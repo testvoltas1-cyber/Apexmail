@@ -147,6 +147,37 @@ export interface AuditLog {
   created_at: string;
 }
 
+export interface MailDeliveryLog {
+  id: string;
+  email_id?: string;
+  mailbox_address: string;
+  to_addresses: string[];
+  subject: string;
+  direction: 'outbound' | 'inbound';
+  status: 'delivered' | 'failed' | 'queued';
+  smtp_host?: string;
+  smtp_port?: number;
+  tls_type?: string;
+  response_code?: string;
+  response_message?: string;
+  error_reason?: string;
+  created_at: string;
+  duration_ms?: number;
+}
+
+export interface SmtpServerConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  from_name?: string;
+  is_active: boolean;
+  last_tested_at?: string;
+  last_test_status?: 'success' | 'failed';
+  last_test_log?: string;
+}
+
 export interface SystemStats {
   total_users: number;
   total_domains: number;

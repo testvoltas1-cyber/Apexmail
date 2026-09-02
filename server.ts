@@ -19,6 +19,7 @@ import {
   processInboundEmailStream,
   startOutboxWorker,
   calculateSpamScore,
+  testSmtpConnection,
 } from './server/mailer.js';
 import { generateSmartReplies, summarizeEmail, polishDraft } from './server/ai.js';
 import { User, Domain, Mailbox, Email, OutboxItem, Contact } from './server/types.js';
@@ -1000,6 +1001,123 @@ ${body_html || `<p>${(body_text || 'This is a test inbound email message receive
     }
     const users = db.getUsers().map(({ password_hash, ...rest }) => rest);
     res.json({ users });
+  });
+
+  // ==========================================
+  // SMTP RELAY & MAIL SERVER MANAGEMENT
+  // ==========================================
+  app.get('/api/admin/smtp/config', authMiddleware, (_req: AuthRequest, res) => {
+    const config = db.getSmtpConfig();
+    res.json({
+      config,
+      ports_status: [
+        { port: 587, name: 'STARTTLS Submission', status: 'RECOMMENDED', description: 'Standard secure submission port. Open in cloud environments (Render, AWS, DigitalOcean).' },
+        { port: 465, name: 'SMTPS (SSL/TLS)', status: 'SUPPORTED', description: 'Direct SSL encrypted delivery. Commonly used by Namecheap Private Email and Gmail.' },
+        { port: 2525, name: 'Alternate Submission', status: 'SUPPORTED', description: 'Alternative port supported by SendGrid, Mailgun, and Brevo.' },
+        { port: 25, name: 'Direct MX (Unauthenticated)', status: 'BLOCKED_BY_CLOUD', description: 'Blocked by Render and cloud firewalls to prevent spam. Direct MX without relay is not recommended.' },
+      ]
+    });
+  });
+
+  app.post('/api/admin/smtp/config', authMiddleware, (req: AuthRequest, res) => {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const { host, port, secure, user, pass, from_name, is_active } = req.body;
+    const updated = db.updateSmtpConfig({
+      host: host?.trim() ?? '',
+      port: Number(port) || 587,
+      secure: Boolean(secure),
+      user: user?.trim() ?? '',
+      pass: pass ?? '',
+      from_name: from_name?.trim() ?? 'ApexMail Relay',
+      is_active: Boolean(is_active),
+    });
+
+    db.logAction('SMTP_CONFIG_UPDATED', { host: updated.host, port: updated.port, user: updated.user, is_active: updated.is_active }, req.user.id, req.ip);
+    res.json({ success: true, config: updated });
+  });
+
+  app.post('/api/admin/smtp/test', authMiddleware, async (req: AuthRequest, res) => {
+    const { host, port, secure, user, pass, to_email, from_email } = req.body;
+    const testResult = await testSmtpConnection({
+      host: host || '',
+      port: Number(port) || 587,
+      secure: Boolean(secure),
+      user: user || '',
+      pass: pass || '',
+      to_email: to_email || req.user?.email,
+      from_email: from_email,
+    });
+
+    // Update last test timestamp in db
+    db.updateSmtpConfig({
+      last_tested_at: new Date().toISOString(),
+      last_test_status: testResult.success ? 'success' : 'failed',
+      last_test_log: testResult.logs.join('\n'),
+    });
+
+    db.logAction('SMTP_CONNECTION_TEST', {
+      host,
+      port,
+      success: testResult.success,
+      duration_ms: testResult.duration_ms,
+      error: testResult.error,
+    }, req.user?.id, req.ip);
+
+    res.json(testResult);
+  });
+
+  // ==========================================
+  // MAIL DELIVERY LOGS & QUEUE FLUSH
+  // ==========================================
+  app.get('/api/admin/mail-logs', authMiddleware, (req: AuthRequest, res) => {
+    const status = req.query.status as string;
+    const direction = req.query.direction as string;
+    const search = req.query.q as string;
+    const limit = Number(req.query.limit) || 150;
+
+    const logs = db.getDeliveryLogs(limit, { status, direction, search });
+    res.json({ logs, count: logs.length });
+  });
+
+  app.delete('/api/admin/mail-logs', authMiddleware, (req: AuthRequest, res) => {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    db.clearDeliveryLogs();
+    res.json({ success: true, message: 'Delivery logs cleared' });
+  });
+
+  app.post('/api/admin/outbox/flush', authMiddleware, async (req: AuthRequest, res) => {
+    const pendingItems = db.getPendingOutboxItems();
+    let sentCount = 0;
+    let failedCount = 0;
+
+    for (const item of pendingItems) {
+      const email = db.getEmailById(item.email_id);
+      const mailbox = db.getMailboxById(item.mailbox_id);
+      if (!email || !mailbox) continue;
+      const domain = db.getDomainById(mailbox.domain_id);
+      const result = await sendEmailDirectOrRelay(email, mailbox, domain);
+      if (result.success) {
+        db.updateOutboxItem(item.id, {
+          status: 'sent',
+          sent_at: new Date().toISOString(),
+          last_error: undefined,
+        });
+        sentCount++;
+      } else {
+        db.updateOutboxItem(item.id, {
+          status: 'failed',
+          attempts: item.attempts + 1,
+          last_error: result.error,
+        });
+        failedCount++;
+      }
+    }
+
+    res.json({ success: true, processed: pendingItems.length, sent: sentCount, failed: failedCount });
   });
 
   // ==========================================

@@ -13,6 +13,8 @@ import {
   OutboxItem,
   Contact,
   AuditLog,
+  MailDeliveryLog,
+  SmtpServerConfig,
   SystemStats
 } from './types.js';
 
@@ -24,6 +26,8 @@ interface DatabaseSchema {
   outbox: OutboxItem[];
   contacts: Contact[];
   audit_logs: AuditLog[];
+  mail_delivery_logs?: MailDeliveryLog[];
+  smtp_config?: SmtpServerConfig;
 }
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -395,6 +399,79 @@ class Database {
 
   getAuditLogs(limit = 100): AuditLog[] {
     return this.data.audit_logs.slice(0, limit);
+  }
+
+  // Delivery & Mail Server Logs
+  addDeliveryLog(logData: Omit<MailDeliveryLog, 'id' | 'created_at'>): MailDeliveryLog {
+    if (!this.data.mail_delivery_logs) {
+      this.data.mail_delivery_logs = [];
+    }
+    const log: MailDeliveryLog = {
+      id: uuidv4(),
+      ...logData,
+      created_at: new Date().toISOString(),
+    };
+    this.data.mail_delivery_logs.unshift(log);
+    if (this.data.mail_delivery_logs.length > 500) {
+      this.data.mail_delivery_logs = this.data.mail_delivery_logs.slice(0, 500);
+    }
+    this.save();
+    return log;
+  }
+
+  getDeliveryLogs(limit = 100, filter?: { status?: string; direction?: string; search?: string }): MailDeliveryLog[] {
+    if (!this.data.mail_delivery_logs) {
+      this.data.mail_delivery_logs = [];
+    }
+    return this.data.mail_delivery_logs
+      .filter(l => {
+        if (filter?.status && filter.status !== 'all' && l.status !== filter.status) return false;
+        if (filter?.direction && filter.direction !== 'all' && l.direction !== filter.direction) return false;
+        if (filter?.search && filter.search.trim()) {
+          const s = filter.search.toLowerCase().trim();
+          const matchMailbox = l.mailbox_address.toLowerCase().includes(s);
+          const matchTo = l.to_addresses.some(a => a.toLowerCase().includes(s));
+          const matchSub = l.subject.toLowerCase().includes(s);
+          const matchHost = l.smtp_host?.toLowerCase().includes(s);
+          const matchErr = l.error_reason?.toLowerCase().includes(s);
+          if (!matchMailbox && !matchTo && !matchSub && !matchHost && !matchErr) return false;
+        }
+        return true;
+      })
+      .slice(0, limit);
+  }
+
+  clearDeliveryLogs(): boolean {
+    this.data.mail_delivery_logs = [];
+    this.save();
+    return true;
+  }
+
+  // Global SMTP Configuration
+  getSmtpConfig(): SmtpServerConfig {
+    if (this.data.smtp_config) {
+      return this.data.smtp_config;
+    }
+    // Return env-based or default config
+    return {
+      host: process.env.SMTP_DEFAULT_HOST || '',
+      port: Number(process.env.SMTP_DEFAULT_PORT) || 587,
+      secure: process.env.SMTP_DEFAULT_SECURE === 'true',
+      user: process.env.SMTP_DEFAULT_USER || '',
+      pass: process.env.SMTP_DEFAULT_PASS || '',
+      from_name: process.env.SMTP_DEFAULT_FROM_NAME || 'ApexMail Relay',
+      is_active: Boolean(process.env.SMTP_DEFAULT_HOST && process.env.SMTP_DEFAULT_USER),
+    };
+  }
+
+  updateSmtpConfig(config: Partial<SmtpServerConfig>): SmtpServerConfig {
+    const current = this.getSmtpConfig();
+    this.data.smtp_config = {
+      ...current,
+      ...config,
+    };
+    this.save();
+    return this.data.smtp_config;
   }
 
   // System Statistics

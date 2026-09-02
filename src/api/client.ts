@@ -1,7 +1,7 @@
 // src/api/client.ts
 // Unified REST API Client for Webmail Backend
 
-import { User, Domain, Mailbox, Email, OutboxItem, Contact, AuditLog, SystemStats } from '../types';
+import { User, Domain, Mailbox, Email, OutboxItem, Contact, AuditLog, SystemStats, SmtpServerConfig, MailDeliveryLog } from '../types';
 
 const TOKEN_KEY = 'webmail_auth_token';
 
@@ -275,12 +275,56 @@ export const api = {
     return apiFetch<{ success: boolean; message?: string }>(`/api/admin/outbox/${id}/retry`, { method: 'POST' });
   },
 
+  async flushOutbox(): Promise<{ success: boolean; processed: number; sent: number; failed: number }> {
+    return apiFetch<{ success: boolean; processed: number; sent: number; failed: number }>('/api/admin/outbox/flush', { method: 'POST' });
+  },
+
   async getAuditLogs(): Promise<{ logs: AuditLog[] }> {
     return apiFetch<{ logs: AuditLog[] }>('/api/admin/audit-logs');
   },
 
   async getUsers(): Promise<{ users: User[] }> {
     return apiFetch<{ users: User[] }>('/api/admin/users');
+  },
+
+  // SMTP Relay & Delivery Diagnostics
+  async getSmtpConfig(): Promise<{ config: SmtpServerConfig; ports_status: { port: number; name: string; status: string; description: string }[] }> {
+    return apiFetch<{ config: SmtpServerConfig; ports_status: { port: number; name: string; status: string; description: string }[] }>('/api/admin/smtp/config');
+  },
+
+  async updateSmtpConfig(config: Partial<SmtpServerConfig>): Promise<{ success: boolean; config: SmtpServerConfig }> {
+    return apiFetch<{ success: boolean; config: SmtpServerConfig }>('/api/admin/smtp/config', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+  },
+
+  async testSmtpConnection(payload: {
+    host: string;
+    port: number;
+    secure: boolean;
+    user?: string;
+    pass?: string;
+    to_email?: string;
+    from_email?: string;
+  }): Promise<{ success: boolean; logs: string[]; duration_ms: number; error?: string; response?: string }> {
+    return apiFetch<{ success: boolean; logs: string[]; duration_ms: number; error?: string; response?: string }>('/api/admin/smtp/test', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async getMailDeliveryLogs(params: { status?: string; direction?: string; q?: string; limit?: number } = {}): Promise<{ logs: MailDeliveryLog[]; count: number }> {
+    const query = new URLSearchParams();
+    if (params.status) query.set('status', params.status);
+    if (params.direction) query.set('direction', params.direction);
+    if (params.q) query.set('q', params.q);
+    if (params.limit) query.set('limit', String(params.limit));
+    return apiFetch<{ logs: MailDeliveryLog[]; count: number }>(`/api/admin/mail-logs?${query.toString()}`);
+  },
+
+  async clearMailDeliveryLogs(): Promise<{ success: boolean }> {
+    return apiFetch<{ success: boolean }>('/api/admin/mail-logs', { method: 'DELETE' });
   },
 
   // AI Helpers
