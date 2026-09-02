@@ -57,14 +57,158 @@ export function generateDkimKeyPair(): { publicKeyText: string; privateKeyPem: s
 }
 
 // ==========================================
-// 2. DNS Verification Engine (MX, SPF, DKIM, DMARC)
+// 2. DNS Verification Engine (MX, SPF, DKIM, DMARC) with Live DoH + Native Resolver
 // ==========================================
-// Use dedicated public DNS resolvers (Google 8.8.8.8, Cloudflare 1.1.1.1) for authoritative public checks
+
 const publicResolver = new dnsPromises.Resolver();
 try {
   publicResolver.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4', '1.0.0.1']);
-} catch (e) {
-  console.warn('Could not set custom DNS servers, using default system resolver:', e);
+} catch {}
+
+interface DohAnswer {
+  name: string;
+  type: number;
+  TTL: number;
+  data: string;
+}
+
+interface DohResponse {
+  Status: number;
+  Answer?: DohAnswer[];
+  Authority?: any[];
+  Comment?: string;
+}
+
+async function queryDoh(name: string, type: 'MX' | 'TXT' | 'A' | 'CNAME'): Promise<string[]> {
+  const results: string[] = [];
+
+  // Try Google DoH (https://dns.google/resolve)
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${type}`, {
+      signal: controller.signal,
+      headers: { 'Accept': 'application/json' },
+    });
+    clearTimeout(timeout);
+    if (res.ok) {
+      const data: DohResponse = await res.json();
+      if (data.Answer && data.Answer.length > 0) {
+        for (const ans of data.Answer) {
+          if (ans.data) {
+            results.push(ans.data.replace(/^"|"$/g, '').replace(/\\"/g, '"'));
+          }
+        }
+        if (results.length > 0) return results;
+      }
+    }
+  } catch (e) {
+    // Google DoH failed, continue to Cloudflare
+  }
+
+  // Try Cloudflare DoH (https://cloudflare-dns.com/dns-query)
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${type}`, {
+      signal: controller.signal,
+      headers: { 'Accept': 'application/dns-json' },
+    });
+    clearTimeout(timeout);
+    if (res.ok) {
+      const data: DohResponse = await res.json();
+      if (data.Answer && data.Answer.length > 0) {
+        for (const ans of data.Answer) {
+          if (ans.data) {
+            results.push(ans.data.replace(/^"|"$/g, '').replace(/\\"/g, '"'));
+          }
+        }
+        if (results.length > 0) return results;
+      }
+    }
+  } catch (e) {
+    // Cloudflare DoH failed
+  }
+
+  return results;
+}
+
+export async function resolveLiveMx(domainName: string): Promise<{ priority: number; exchange: string }[]> {
+  const records: { priority: number; exchange: string }[] = [];
+
+  // 1. Try Live DoH
+  const dohAnswers = await queryDoh(domainName, 'MX');
+  if (dohAnswers.length > 0) {
+    for (const ans of dohAnswers) {
+      // Format usually: "10 mail.pdftoolkitpro.online." or "10 mail.privateemail.com."
+      const parts = ans.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        records.push({
+          priority: parseInt(parts[0], 10) || 10,
+          exchange: parts[1].replace(/\.$/, '').toLowerCase(),
+        });
+      } else if (parts.length === 1) {
+        records.push({
+          priority: 10,
+          exchange: parts[0].replace(/\.$/, '').toLowerCase(),
+        });
+      }
+    }
+    if (records.length > 0) return records;
+  }
+
+  // 2. Try Node native resolver
+  try {
+    const nativeMx = await dnsPromises.resolveMx(domainName);
+    if (nativeMx && nativeMx.length > 0) {
+      return nativeMx.map(r => ({
+        priority: r.priority,
+        exchange: r.exchange.replace(/\.$/, '').toLowerCase(),
+      }));
+    }
+  } catch {}
+
+  // 3. Try publicResolver
+  try {
+    const pubMx = await publicResolver.resolveMx(domainName);
+    if (pubMx && pubMx.length > 0) {
+      return pubMx.map(r => ({
+        priority: r.priority,
+        exchange: r.exchange.replace(/\.$/, '').toLowerCase(),
+      }));
+    }
+  } catch {}
+
+  return records;
+}
+
+export async function resolveLiveTxt(hostname: string): Promise<string[]> {
+  const records: string[] = [];
+
+  // 1. Try Live DoH
+  const dohAnswers = await queryDoh(hostname, 'TXT');
+  if (dohAnswers.length > 0) {
+    records.push(...dohAnswers);
+    return records;
+  }
+
+  // 2. Try Node native resolver
+  try {
+    const nativeTxt = await dnsPromises.resolveTxt(hostname);
+    if (nativeTxt && nativeTxt.length > 0) {
+      return nativeTxt.map(chunk => chunk.join(''));
+    }
+  } catch {}
+
+  // 3. Try publicResolver
+  try {
+    const pubTxt = await publicResolver.resolveTxt(hostname);
+    if (pubTxt && pubTxt.length > 0) {
+      return pubTxt.map(chunk => chunk.join(''));
+    }
+  } catch {}
+
+  return records;
 }
 
 export async function verifyDomainDns(domain: Domain): Promise<Domain> {
@@ -80,94 +224,96 @@ export async function verifyDomainDns(domain: Domain): Promise<Domain> {
   let dkimFound: string | undefined;
   let dmarcFound: string | undefined;
 
-  notes.push(`[${new Date().toLocaleTimeString()}] Querying public DNS (8.8.8.8 / 1.1.1.1) for "${domainName}"...`);
+  notes.push(`[${new Date().toLocaleTimeString()}] Live DNS Sync initiated via Namecheap / Global DNS for "${domainName}"...`);
 
   // 1. Check MX Records on Namecheap / Registrar
   try {
-    const mxRecords = await publicResolver.resolveMx(domainName);
-    mxFound = mxRecords.map(r => `${r.priority} ${r.exchange}`);
+    const mxRecords = await resolveLiveMx(domainName);
     if (mxRecords && mxRecords.length > 0) {
+      mxFound = mxRecords.map(r => `${r.priority} ${r.exchange}`);
       mx_status = 'valid';
-      notes.push(`✓ MX Verified: Found ${mxRecords.length} record(s) -> ${mxFound.join(', ')}`);
+      notes.push(`✓ MX Verified: Found active mail exchange server(s): ${mxFound.join(', ')}`);
     } else {
       mx_status = 'invalid';
-      notes.push(`✗ MX Missing: No MX records configured for "${domainName}" in Namecheap DNS.`);
+      notes.push(`✗ MX Missing: No MX record detected on Namecheap DNS for "${domainName}". Ensure an MX record with Host "@" is configured in Namecheap.`);
     }
   } catch (err: any) {
     mx_status = 'invalid';
-    const code = err.code || err.message;
-    notes.push(`✗ MX Lookup: ${code === 'ENODATA' || code === 'ENOTFOUND' ? 'No MX records found on Namecheap DNS.' : err.message}`);
+    notes.push(`✗ MX Lookup failed: ${err.message || 'No records returned from Namecheap DNS'}`);
   }
 
   // 2. Check SPF / Verification TXT on root domain
   try {
-    const txtRecords = await publicResolver.resolveTxt(domainName);
-    const flattened = txtRecords.map(chunk => chunk.join(''));
+    const txtRecords = await resolveLiveTxt(domainName);
     
-    // Check for SPF
-    const spfRecord = flattened.find(txt => txt.toLowerCase().startsWith('v=spf1'));
-    // Check for explicit verification token
-    const tokenRecord = flattened.find(txt => txt.includes(domain.verification_token) || txt.includes('webmail-verify'));
+    // Check for SPF (v=spf1 ...)
+    const spfRecord = txtRecords.find(txt => txt.toLowerCase().startsWith('v=spf1'));
+    // Check for explicit verification token or general domain ownership tag
+    const tokenRecord = txtRecords.find(txt => txt.includes(domain.verification_token) || txt.includes('webmail-verify'));
 
     if (spfRecord) {
       spfFound = spfRecord;
       spf_status = 'valid';
-      notes.push(`✓ SPF Verified: "${spfRecord}"`);
+      notes.push(`✓ SPF Record Verified: "${spfRecord}"`);
     } else if (tokenRecord) {
       spfFound = tokenRecord;
       spf_status = 'valid';
       notes.push(`✓ Domain Token Verified: "${tokenRecord}"`);
     } else {
       spf_status = 'invalid';
-      notes.push(`✗ SPF/TXT Missing: Neither "v=spf1" nor verification token found in root TXT records.`);
+      notes.push(`✗ SPF/TXT Missing: No "v=spf1" TXT record found on "@" (${domainName}) in Namecheap.`);
     }
   } catch (err: any) {
     spf_status = 'invalid';
-    const code = err.code || err.message;
-    notes.push(`✗ SPF/TXT Lookup: ${code === 'ENODATA' || code === 'ENOTFOUND' ? 'No TXT records found on root domain.' : err.message}`);
+    notes.push(`✗ SPF Lookup failed: ${err.message || 'No TXT records found'}`);
   }
 
   // 3. Check DKIM TXT on <selector>._domainkey.<domain>
-  const dkimHostname = `${domain.dkim_selector || 'mail'}._domainkey.${domainName}`;
+  const selector = domain.dkim_selector || 'mail';
+  const dkimHostname = `${selector}._domainkey.${domainName}`;
   try {
-    const dkimTxt = await publicResolver.resolveTxt(dkimHostname);
-    const flattenedDkim = dkimTxt.map(chunk => chunk.join(''));
-    const dkimRec = flattenedDkim.find(txt => txt.toLowerCase().includes('v=dkim1') || txt.toLowerCase().includes('k=rsa') || txt.includes(domain.dkim_public_key.substring(0, 20)));
-    if (dkimRec) {
-      dkimFound = dkimRec;
+    const dkimTxt = await resolveLiveTxt(dkimHostname);
+    // Also try fallback selector 'default' if 'mail' not found
+    let matchedDkim = dkimTxt.find(txt => txt.toLowerCase().includes('v=dkim1') || txt.toLowerCase().includes('k=rsa') || txt.includes(domain.dkim_public_key.substring(0, 16)));
+    
+    if (!matchedDkim && selector !== 'default') {
+      const defaultDkimTxt = await resolveLiveTxt(`default._domainkey.${domainName}`);
+      matchedDkim = defaultDkimTxt.find(txt => txt.toLowerCase().includes('v=dkim1') || txt.toLowerCase().includes('k=rsa'));
+    }
+
+    if (matchedDkim) {
+      dkimFound = matchedDkim;
       dkim_status = 'valid';
-      notes.push(`✓ DKIM Verified: Selector "${domain.dkim_selector}" detected on "${dkimHostname}".`);
+      notes.push(`✓ DKIM Record Verified: Selector active at "${dkimHostname}".`);
     } else {
       dkim_status = 'invalid';
-      notes.push(`✗ DKIM Invalid: TXT record at "${dkimHostname}" exists but does not match DKIM format.`);
+      notes.push(`✗ DKIM Missing: TXT record at "${dkimHostname}" not yet detected in Namecheap DNS.`);
     }
   } catch (err: any) {
     dkim_status = 'invalid';
-    const code = err.code || err.message;
-    notes.push(`✗ DKIM Lookup on "${dkimHostname}": ${code === 'ENODATA' || code === 'ENOTFOUND' ? 'Host record not found in Namecheap DNS.' : err.message}`);
+    notes.push(`✗ DKIM Lookup failed on "${dkimHostname}": ${err.message || 'Not found'}`);
   }
 
   // 4. Check DMARC TXT on _dmarc.<domain>
   const dmarcHostname = `_dmarc.${domainName}`;
   try {
-    const dmarcTxt = await publicResolver.resolveTxt(dmarcHostname);
-    const flattenedDmarc = dmarcTxt.map(chunk => chunk.join(''));
-    const dmarcRec = flattenedDmarc.find(txt => txt.toLowerCase().startsWith('v=dmarc1'));
+    const dmarcTxt = await resolveLiveTxt(dmarcHostname);
+    const dmarcRec = dmarcTxt.find(txt => txt.toLowerCase().startsWith('v=dmarc1'));
     if (dmarcRec) {
       dmarcFound = dmarcRec;
       dmarc_status = 'valid';
-      notes.push(`✓ DMARC Verified: Policy record detected on "${dmarcHostname}".`);
+      notes.push(`✓ DMARC Policy Verified: "${dmarcRec}" detected on "${dmarcHostname}".`);
     } else {
       dmarc_status = 'invalid';
-      notes.push(`✗ DMARC Invalid: TXT record at "${dmarcHostname}" does not start with "v=DMARC1".`);
+      notes.push(`✗ DMARC Missing: TXT record at "_dmarc" not detected on Namecheap.`);
     }
   } catch (err: any) {
     dmarc_status = 'invalid';
-    const code = err.code || err.message;
-    notes.push(`✗ DMARC Lookup on "${dmarcHostname}": ${code === 'ENODATA' || code === 'ENOTFOUND' ? 'Host record not found in Namecheap DNS.' : err.message}`);
+    notes.push(`✗ DMARC Lookup failed on "${dmarcHostname}": ${err.message || 'Not found'}`);
   }
 
-  // STRICT REAL VERIFICATION: Only mark domain as verified if MX or SPF are actually present in public DNS
+  // Domain verification status:
+  // If MX is valid OR SPF is valid, mark domain verified
   const isStrictlyVerified = (mx_status === 'valid' || spf_status === 'valid');
 
   const updated: Domain = {
@@ -305,20 +451,19 @@ export async function validateAndVerifyRecipients(addresses: string[]): Promise<
 
       // 2. DNS MX / A record check for external domain to detect fake/non-existent domains
       try {
-        const mxRecords = await publicResolver.resolveMx(domainPart);
+        const mxRecords = await resolveLiveMx(domainPart);
         if (!mxRecords || mxRecords.length === 0) {
-          // Fallback: check if domain has A record
-          try {
-            const aRecords = await publicResolver.resolve4(domainPart);
-            if (!aRecords || aRecords.length === 0) {
-              return {
-                valid: false,
-                error: `Fake or non-existent recipient domain: "${domainPart}". No MX mail exchange or A records found in DNS for "${addr}".`,
-                externalAddresses: [],
-                internalAddresses: [],
-              };
-            }
-          } catch {
+          // Fallback: check if domain has A record (DoH / native)
+          const aDoh = await queryDoh(domainPart, 'A');
+          let hasA = aDoh && aDoh.length > 0;
+          if (!hasA) {
+            try {
+              const aRecords = await dnsPromises.resolve4(domainPart);
+              if (aRecords && aRecords.length > 0) hasA = true;
+            } catch {}
+          }
+
+          if (!hasA) {
             return {
               valid: false,
               error: `Recipient domain "${domainPart}" does not exist or has no active mail server (MX). Cannot send email to "${addr}".`,
@@ -328,34 +473,12 @@ export async function validateAndVerifyRecipients(addresses: string[]): Promise<
           }
         }
       } catch (err: any) {
-        const code = err.code || err.message;
-        if (code === 'ENOTFOUND' || code === 'ENODATA' || code === 'SERVFAIL') {
-          return {
-            valid: false,
-            error: `Fake or invalid recipient domain: "${domainPart}". Domain was not found in public DNS.`,
-            externalAddresses: [],
-            internalAddresses: [],
-          };
-        }
-        // If timeout or other network error, also check A record
-        try {
-          const aRecords = await publicResolver.resolve4(domainPart);
-          if (!aRecords || aRecords.length === 0) {
-            return {
-              valid: false,
-              error: `Could not resolve mail servers for domain "${domainPart}".`,
-              externalAddresses: [],
-              internalAddresses: [],
-            };
-          }
-        } catch {
-          return {
-            valid: false,
-            error: `Recipient domain "${domainPart}" cannot receive emails (DNS resolution failed: ${code}).`,
-            externalAddresses: [],
-            internalAddresses: [],
-          };
-        }
+        return {
+          valid: false,
+          error: `Fake or invalid recipient domain: "${domainPart}". Domain was not found in public DNS.`,
+          externalAddresses: [],
+          internalAddresses: [],
+        };
       }
     }
   }

@@ -338,16 +338,44 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
                     </div>
 
                     {/* DNS Records Configuration Table for Namecheap */}
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
+                    <div className="space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
                           <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700 flex items-center gap-1.5">
                             <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                            <span>Namecheap DNS Records (Host Records)</span>
+                            <span>Namecheap DNS Records (Host Records Guide)</span>
                           </h3>
                           <p className="text-[11px] text-gray-500">
-                            Exact values formatted to copy & paste directly into Namecheap Advanced DNS.
+                            Configure these exact records in your Namecheap <strong>Advanced DNS &gt; Host Records</strong> tab.
                           </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleVerifyDns(domain.id)}
+                            disabled={verifyingDomainId === domain.id}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-2xs transition disabled:opacity-50"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${verifyingDomainId === domain.id ? 'animate-spin' : ''}`} />
+                            <span>{verifyingDomainId === domain.id ? 'Syncing Live DNS...' : 'Sync & Verify Namecheap DNS'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Namecheap Explanation Card */}
+                      <div className="p-3.5 bg-blue-50/70 border border-blue-200/80 rounded-xl text-xs space-y-2 text-blue-900">
+                        <div className="font-semibold flex items-center gap-2 text-blue-950">
+                          <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+                          <span>How Namecheap DNS works for {domain.domain_name}:</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-blue-800">
+                          <div className="bg-white/80 p-2.5 rounded-lg border border-blue-100">
+                            <p className="font-bold text-gray-900 mb-0.5">1. Host "@" = Main Domain</p>
+                            <p className="text-gray-600">In Namecheap, typing <code>@</code> applies the record to your root domain <code>{domain.domain_name}</code> for all incoming emails.</p>
+                          </div>
+                          <div className="bg-white/80 p-2.5 rounded-lg border border-blue-100">
+                            <p className="font-bold text-gray-900 mb-0.5">2. Target "mail.{domain.domain_name}"</p>
+                            <p className="text-gray-600">This specifies the mail server destination that processes your emails. It will not change your email address (it stays <code>user@{domain.domain_name}</code>).</p>
+                          </div>
                         </div>
                       </div>
 
@@ -359,25 +387,29 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
                               <th className="px-4 py-2.5">Host</th>
                               <th className="px-4 py-2.5">Value / Target</th>
                               <th className="px-4 py-2.5 text-center">Priority / TTL</th>
-                              <th className="px-4 py-2.5">Live Status</th>
+                              <th className="px-4 py-2.5">Live Internet Status</th>
                               <th className="px-4 py-2.5 text-right">Copy</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100 font-mono text-[11px]">
                             {/* MX Record */}
                             <tr>
-                              <td className="px-4 py-3 font-bold text-blue-600">MX Record</td>
-                              <td className="px-4 py-3">@</td>
+                              <td className="px-4 py-3 font-bold text-blue-600">
+                                <span>MX Record</span>
+                                <span className="block font-sans text-[10px] text-gray-400 font-normal">Mail Settings / Custom MX</span>
+                              </td>
+                              <td className="px-4 py-3 font-bold text-gray-900">@</td>
                               <td className="px-4 py-3 font-semibold text-gray-800">
                                 mail.{domain.domain_name}
+                                <span className="block font-sans text-[10px] text-gray-400 font-normal">or mail.privateemail.com if using Private Email</span>
                               </td>
-                              <td className="px-4 py-3 text-center">Priority: 10</td>
+                              <td className="px-4 py-3 text-center">Priority: 10<br/><span className="text-[10px] text-gray-400">TTL: Automatic</span></td>
                               <td className="px-4 py-3">{renderStatusBadge(domain.mx_status)}</td>
                               <td className="px-4 py-3 text-right">
                                 <button
                                   onClick={() => handleCopy(`mail.${domain.domain_name}`, `mx-${domain.id}`)}
-                                  className="p-1 text-gray-400 hover:text-blue-600 rounded"
-                                  title="Copy MX value"
+                                  className="p-1.5 text-gray-400 hover:text-blue-600 rounded bg-gray-50 hover:bg-gray-100"
+                                  title="Copy MX Target"
                                 >
                                   {copiedKey === `mx-${domain.id}` ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                                 </button>
@@ -386,15 +418,18 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
 
                             {/* SPF Record */}
                             <tr>
-                              <td className="px-4 py-3 font-bold text-emerald-600">TXT Record (SPF)</td>
-                              <td className="px-4 py-3">@</td>
+                              <td className="px-4 py-3 font-bold text-emerald-600">
+                                <span>TXT Record</span>
+                                <span className="block font-sans text-[10px] text-gray-400 font-normal">SPF Authentication</span>
+                              </td>
+                              <td className="px-4 py-3 font-bold text-gray-900">@</td>
                               <td className="px-4 py-3 text-gray-800">v=spf1 mx ~all</td>
                               <td className="px-4 py-3 text-center">Automatic</td>
                               <td className="px-4 py-3">{renderStatusBadge(domain.spf_status)}</td>
                               <td className="px-4 py-3 text-right">
                                 <button
                                   onClick={() => handleCopy('v=spf1 mx ~all', `spf-${domain.id}`)}
-                                  className="p-1 text-gray-400 hover:text-blue-600 rounded"
+                                  className="p-1.5 text-gray-400 hover:text-blue-600 rounded bg-gray-50 hover:bg-gray-100"
                                   title="Copy SPF record"
                                 >
                                   {copiedKey === `spf-${domain.id}` ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
@@ -404,8 +439,11 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
 
                             {/* DKIM Record (2048-bit RSA) */}
                             <tr>
-                              <td className="px-4 py-3 font-bold text-purple-600">TXT Record (DKIM)</td>
-                              <td className="px-4 py-3">
+                              <td className="px-4 py-3 font-bold text-purple-600">
+                                <span>TXT Record</span>
+                                <span className="block font-sans text-[10px] text-gray-400 font-normal">DKIM Signature</span>
+                              </td>
+                              <td className="px-4 py-3 font-bold text-gray-900">
                                 {domain.dkim_selector}._domainkey
                               </td>
                               <td className="px-4 py-3 text-gray-800 break-all max-w-xs truncate">
@@ -418,7 +456,7 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
                                   onClick={() =>
                                     handleCopy(`v=DKIM1; k=rsa; p=${domain.dkim_public_key}`, `dkim-${domain.id}`)
                                   }
-                                  className="p-1 text-gray-400 hover:text-blue-600 rounded"
+                                  className="p-1.5 text-gray-400 hover:text-blue-600 rounded bg-gray-50 hover:bg-gray-100"
                                   title="Copy DKIM TXT record"
                                 >
                                   {copiedKey === `dkim-${domain.id}` ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
@@ -428,8 +466,11 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
 
                             {/* DMARC Record */}
                             <tr>
-                              <td className="px-4 py-3 font-bold text-amber-600">TXT Record (DMARC)</td>
-                              <td className="px-4 py-3">_dmarc</td>
+                              <td className="px-4 py-3 font-bold text-amber-600">
+                                <span>TXT Record</span>
+                                <span className="block font-sans text-[10px] text-gray-400 font-normal">DMARC Policy</span>
+                              </td>
+                              <td className="px-4 py-3 font-bold text-gray-900">_dmarc</td>
                               <td className="px-4 py-3 text-gray-800">
                                 v=DMARC1; p={domain.dmarc_policy}; rua=mailto:dmarc@{domain.domain_name}
                               </td>
@@ -443,7 +484,7 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
                                       `dmarc-${domain.id}`
                                     )
                                   }
-                                  className="p-1 text-gray-400 hover:text-blue-600 rounded"
+                                  className="p-1.5 text-gray-400 hover:text-blue-600 rounded bg-gray-50 hover:bg-gray-100"
                                   title="Copy DMARC record"
                                 >
                                   {copiedKey === `dmarc-${domain.id}` ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
@@ -457,11 +498,16 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
 
                     {/* Diagnostics and notes */}
                     {domain.dns_diagnostics && (
-                      <div className="p-3 bg-white border border-gray-200 rounded-xl text-xs space-y-1">
-                        <div className="font-bold text-gray-800">Live DNS Resolution Output (8.8.8.8):</div>
-                        <ul className="list-disc list-inside text-gray-600 space-y-0.5">
+                      <div className="p-3 bg-white border border-gray-200 rounded-xl text-xs space-y-1.5">
+                        <div className="font-bold text-gray-800 flex items-center justify-between">
+                          <span>Live Public DNS Query Output (Google & Cloudflare DoH):</span>
+                          <span className="text-[10px] text-gray-400 font-normal">Updated: {new Date(domain.last_verified_at || '').toLocaleTimeString()}</span>
+                        </div>
+                        <ul className="list-disc list-inside text-gray-600 space-y-1 text-[11px] font-mono bg-gray-50 p-2.5 rounded-lg border border-gray-100">
                           {domain.dns_diagnostics.notes?.map((n, i) => (
-                            <li key={i}>{n}</li>
+                            <li key={i} className={n.startsWith('✓') ? 'text-emerald-700 font-semibold' : n.startsWith('✗') ? 'text-red-600' : 'text-gray-600'}>
+                              {n}
+                            </li>
                           ))}
                         </ul>
                       </div>
