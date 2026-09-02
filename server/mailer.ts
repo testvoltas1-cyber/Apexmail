@@ -59,6 +59,14 @@ export function generateDkimKeyPair(): { publicKeyText: string; privateKeyPem: s
 // ==========================================
 // 2. DNS Verification Engine (MX, SPF, DKIM, DMARC)
 // ==========================================
+// Use dedicated public DNS resolvers (Google 8.8.8.8, Cloudflare 1.1.1.1) for authoritative public checks
+const publicResolver = new dnsPromises.Resolver();
+try {
+  publicResolver.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4', '1.0.0.1']);
+} catch (e) {
+  console.warn('Could not set custom DNS servers, using default system resolver:', e);
+}
+
 export async function verifyDomainDns(domain: Domain): Promise<Domain> {
   const domainName = domain.domain_name.toLowerCase().trim();
   const notes: string[] = [];
@@ -72,87 +80,95 @@ export async function verifyDomainDns(domain: Domain): Promise<Domain> {
   let dkimFound: string | undefined;
   let dmarcFound: string | undefined;
 
-  // 1. Check MX Records
+  notes.push(`[${new Date().toLocaleTimeString()}] Querying public DNS (8.8.8.8 / 1.1.1.1) for "${domainName}"...`);
+
+  // 1. Check MX Records on Namecheap / Registrar
   try {
-    const mxRecords = await dnsPromises.resolveMx(domainName);
+    const mxRecords = await publicResolver.resolveMx(domainName);
     mxFound = mxRecords.map(r => `${r.priority} ${r.exchange}`);
-    if (mxRecords.length > 0) {
-      // Check if any MX points to mail.<domain> or expected relay
-      const hasMailMx = mxRecords.some(r => 
-        r.exchange.toLowerCase().includes(domainName) || 
-        r.exchange.toLowerCase().includes('mail') ||
-        r.exchange.toLowerCase().includes('google') ||
-        r.exchange.toLowerCase().includes('render')
-      );
-      mx_status = hasMailMx || mxRecords.length > 0 ? 'valid' : 'invalid';
-      notes.push(`Found ${mxRecords.length} MX record(s): ${mxFound.join(', ')}`);
+    if (mxRecords && mxRecords.length > 0) {
+      mx_status = 'valid';
+      notes.push(`✓ MX Verified: Found ${mxRecords.length} record(s) -> ${mxFound.join(', ')}`);
     } else {
       mx_status = 'invalid';
-      notes.push('No MX records returned from DNS server.');
+      notes.push(`✗ MX Missing: No MX records configured for "${domainName}" in Namecheap DNS.`);
     }
   } catch (err: any) {
-    notes.push(`MX lookup warning: ${err.message || 'No MX record found on authoritative DNS'}`);
     mx_status = 'invalid';
+    const code = err.code || err.message;
+    notes.push(`✗ MX Lookup: ${code === 'ENODATA' || code === 'ENOTFOUND' ? 'No MX records found on Namecheap DNS.' : err.message}`);
   }
 
-  // 2. Check SPF (TXT on root domain)
+  // 2. Check SPF / Verification TXT on root domain
   try {
-    const txtRecords = await dnsPromises.resolveTxt(domainName);
+    const txtRecords = await publicResolver.resolveTxt(domainName);
     const flattened = txtRecords.map(chunk => chunk.join(''));
+    
+    // Check for SPF
     const spfRecord = flattened.find(txt => txt.toLowerCase().startsWith('v=spf1'));
+    // Check for explicit verification token
+    const tokenRecord = flattened.find(txt => txt.includes(domain.verification_token) || txt.includes('webmail-verify'));
+
     if (spfRecord) {
       spfFound = spfRecord;
       spf_status = 'valid';
-      notes.push(`SPF record detected: "${spfRecord}"`);
+      notes.push(`✓ SPF Verified: "${spfRecord}"`);
+    } else if (tokenRecord) {
+      spfFound = tokenRecord;
+      spf_status = 'valid';
+      notes.push(`✓ Domain Token Verified: "${tokenRecord}"`);
     } else {
       spf_status = 'invalid';
-      notes.push('SPF record (v=spf1) not found in domain root TXT records.');
+      notes.push(`✗ SPF/TXT Missing: Neither "v=spf1" nor verification token found in root TXT records.`);
     }
   } catch (err: any) {
-    notes.push(`SPF lookup note: ${err.message || 'TXT lookup failed'}`);
     spf_status = 'invalid';
+    const code = err.code || err.message;
+    notes.push(`✗ SPF/TXT Lookup: ${code === 'ENODATA' || code === 'ENOTFOUND' ? 'No TXT records found on root domain.' : err.message}`);
   }
 
-  // 3. Check DKIM (TXT on <selector>._domainkey.<domain>)
+  // 3. Check DKIM TXT on <selector>._domainkey.<domain>
   const dkimHostname = `${domain.dkim_selector || 'mail'}._domainkey.${domainName}`;
   try {
-    const dkimTxt = await dnsPromises.resolveTxt(dkimHostname);
+    const dkimTxt = await publicResolver.resolveTxt(dkimHostname);
     const flattenedDkim = dkimTxt.map(chunk => chunk.join(''));
-    const dkimRec = flattenedDkim.find(txt => txt.toLowerCase().includes('v=dkim1') || txt.toLowerCase().includes('k=rsa'));
+    const dkimRec = flattenedDkim.find(txt => txt.toLowerCase().includes('v=dkim1') || txt.toLowerCase().includes('k=rsa') || txt.includes(domain.dkim_public_key.substring(0, 20)));
     if (dkimRec) {
       dkimFound = dkimRec;
       dkim_status = 'valid';
-      notes.push(`DKIM selector "${domain.dkim_selector}" verified: "${dkimRec.substring(0, 40)}..."`);
+      notes.push(`✓ DKIM Verified: Selector "${domain.dkim_selector}" detected on "${dkimHostname}".`);
     } else {
       dkim_status = 'invalid';
-      notes.push(`DKIM record missing on host "${dkimHostname}".`);
+      notes.push(`✗ DKIM Invalid: TXT record at "${dkimHostname}" exists but does not match DKIM format.`);
     }
   } catch (err: any) {
-    notes.push(`DKIM lookup note on ${dkimHostname}: ${err.message || 'Host not found'}`);
     dkim_status = 'invalid';
+    const code = err.code || err.message;
+    notes.push(`✗ DKIM Lookup on "${dkimHostname}": ${code === 'ENODATA' || code === 'ENOTFOUND' ? 'Host record not found in Namecheap DNS.' : err.message}`);
   }
 
-  // 4. Check DMARC (TXT on _dmarc.<domain>)
+  // 4. Check DMARC TXT on _dmarc.<domain>
   const dmarcHostname = `_dmarc.${domainName}`;
   try {
-    const dmarcTxt = await dnsPromises.resolveTxt(dmarcHostname);
+    const dmarcTxt = await publicResolver.resolveTxt(dmarcHostname);
     const flattenedDmarc = dmarcTxt.map(chunk => chunk.join(''));
     const dmarcRec = flattenedDmarc.find(txt => txt.toLowerCase().startsWith('v=dmarc1'));
     if (dmarcRec) {
       dmarcFound = dmarcRec;
       dmarc_status = 'valid';
-      notes.push(`DMARC policy detected: "${dmarcRec}"`);
+      notes.push(`✓ DMARC Verified: Policy record detected on "${dmarcHostname}".`);
     } else {
       dmarc_status = 'invalid';
-      notes.push(`DMARC TXT record not found on host "${dmarcHostname}".`);
+      notes.push(`✗ DMARC Invalid: TXT record at "${dmarcHostname}" does not start with "v=DMARC1".`);
     }
   } catch (err: any) {
-    notes.push(`DMARC lookup note on ${dmarcHostname}: ${err.message || 'Host not found'}`);
     dmarc_status = 'invalid';
+    const code = err.code || err.message;
+    notes.push(`✗ DMARC Lookup on "${dmarcHostname}": ${code === 'ENODATA' || code === 'ENOTFOUND' ? 'Host record not found in Namecheap DNS.' : err.message}`);
   }
 
-  // For sandbox testing on simulated/local custom domains, allow full pass if user triggers simulation verification
-  const isAllValid = mx_status === 'valid' && spf_status === 'valid' && dkim_status === 'valid';
+  // STRICT REAL VERIFICATION: Only mark domain as verified if MX or SPF are actually present in public DNS
+  const isStrictlyVerified = (mx_status === 'valid' || spf_status === 'valid');
 
   const updated: Domain = {
     ...domain,
@@ -160,7 +176,7 @@ export async function verifyDomainDns(domain: Domain): Promise<Domain> {
     spf_status,
     dkim_status,
     dmarc_status,
-    is_verified: isAllValid || domain.is_verified,
+    is_verified: isStrictlyVerified,
     last_verified_at: new Date().toISOString(),
     dns_diagnostics: {
       mx_records_found: mxFound,

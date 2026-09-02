@@ -88,24 +88,14 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
     try {
       const res = await api.verifyDomain(domainId);
       if (res.domain.is_verified) {
-        confetti({ particleCount: 60, spread: 70, origin: { y: 0.6 } });
+        confetti({ particleCount: 70, spread: 80, origin: { y: 0.6 } });
+        alert(`🎉 Success! Domain ${res.domain.domain_name} verified successfully via public DNS!`);
+      } else {
+        alert(`DNS Verification Incomplete:\n\nSome required records were not found on public DNS yet. If you recently saved records on Namecheap, please wait a few minutes for DNS propagation and click Verify again.`);
       }
       onRefreshData();
     } catch (err: any) {
       alert(`DNS Verification failed: ${err.message}`);
-    } finally {
-      setVerifyingDomainId(null);
-    }
-  };
-
-  const handleSimulateVerify = async (domainId: string) => {
-    setVerifyingDomainId(domainId);
-    try {
-      await api.simulateVerifyDomain(domainId);
-      confetti({ particleCount: 70, spread: 80, origin: { y: 0.6 } });
-      onRefreshData();
-    } catch (err: any) {
-      alert(`Simulation failed: ${err.message}`);
     } finally {
       setVerifyingDomainId(null);
     }
@@ -263,23 +253,12 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
                     <button
                       onClick={() => handleVerifyDns(domain.id)}
                       disabled={verifyingDomainId === domain.id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors"
-                      title="Run Live DNS Lookup on global nameservers"
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-2xs transition-colors"
+                      title="Run Live DNS Lookup on Namecheap / Public DNS (8.8.8.8)"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${verifyingDomainId === domain.id ? 'animate-spin' : ''}`} />
-                      <span>{verifyingDomainId === domain.id ? 'Checking DNS...' : 'Verify DNS'}</span>
+                      <span>{verifyingDomainId === domain.id ? 'Checking Public DNS...' : 'Verify Namecheap DNS'}</span>
                     </button>
-
-                    {!domain.is_verified && (
-                      <button
-                        onClick={() => handleSimulateVerify(domain.id)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg transition-colors"
-                        title="Simulate successful verification for sandbox preview"
-                      >
-                        <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                        <span>Sandbox Pass</span>
-                      </button>
-                    )}
 
                     <button
                       onClick={() => handleDeleteDomain(domain.id, domain.domain_name)}
@@ -301,6 +280,22 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
                 {/* Expanded Details & DNS Tables */}
                 {isExpanded && (
                   <div className="p-6 bg-gray-50/40 space-y-6 animate-in fade-in duration-150">
+                    {/* Namecheap Step-by-step Setup Guide */}
+                    <div className="p-4 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2.5">
+                      <div className="flex items-center gap-2 text-blue-900 font-bold text-xs">
+                        <ShieldCheck className="w-4 h-4 text-blue-600" />
+                        <span>How to add records in Namecheap (Advanced DNS)</span>
+                      </div>
+                      <ol className="list-decimal list-inside text-xs text-blue-800 space-y-1">
+                        <li>Log into your <strong>Namecheap.com</strong> account &rarr; Click <strong>Domain List</strong>.</li>
+                        <li>Click the <strong>Manage</strong> button next to <code>{domain.domain_name}</code>.</li>
+                        <li>Go to the <strong>Advanced DNS</strong> tab at the top.</li>
+                        <li>Under <strong>Host Records</strong>, click <strong>Add New Record</strong> and copy the 4 records from the table below.</li>
+                        <li>Save all changes. (Namecheap DNS propagation usually takes 2 to 15 minutes).</li>
+                        <li>Click <strong>"Verify Namecheap DNS"</strong> above to run live query via Google Public DNS (8.8.8.8).</li>
+                      </ol>
+                    </div>
+
                     {/* Mailboxes Section */}
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
@@ -342,16 +337,16 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
                       </div>
                     </div>
 
-                    {/* DNS Records Configuration Table */}
+                    {/* DNS Records Configuration Table for Namecheap */}
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
                           <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700 flex items-center gap-1.5">
                             <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                            <span>Required DNS Configuration Records</span>
+                            <span>Namecheap DNS Records (Host Records)</span>
                           </h3>
                           <p className="text-[11px] text-gray-500">
-                            Add these records in your DNS manager (Cloudflare, GoDaddy, Namecheap, Route53, etc.)
+                            Exact values formatted to copy & paste directly into Namecheap Advanced DNS.
                           </p>
                         </div>
                       </div>
@@ -360,23 +355,23 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
                         <table className="w-full text-left divide-y divide-gray-200">
                           <thead className="bg-gray-50 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
                             <tr>
-                              <th className="px-4 py-2.5">Type</th>
-                              <th className="px-4 py-2.5">Host / Name</th>
-                              <th className="px-4 py-2.5">Value / Destination</th>
-                              <th className="px-4 py-2.5 text-center">Priority</th>
-                              <th className="px-4 py-2.5">Status</th>
-                              <th className="px-4 py-2.5 text-right">Action</th>
+                              <th className="px-4 py-2.5">Type in Namecheap</th>
+                              <th className="px-4 py-2.5">Host</th>
+                              <th className="px-4 py-2.5">Value / Target</th>
+                              <th className="px-4 py-2.5 text-center">Priority / TTL</th>
+                              <th className="px-4 py-2.5">Live Status</th>
+                              <th className="px-4 py-2.5 text-right">Copy</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100 font-mono text-[11px]">
                             {/* MX Record */}
                             <tr>
-                              <td className="px-4 py-3 font-bold text-blue-600">MX</td>
-                              <td className="px-4 py-3">@ (or {domain.domain_name})</td>
+                              <td className="px-4 py-3 font-bold text-blue-600">MX Record</td>
+                              <td className="px-4 py-3">@</td>
                               <td className="px-4 py-3 font-semibold text-gray-800">
                                 mail.{domain.domain_name}
                               </td>
-                              <td className="px-4 py-3 text-center">10</td>
+                              <td className="px-4 py-3 text-center">Priority: 10</td>
                               <td className="px-4 py-3">{renderStatusBadge(domain.mx_status)}</td>
                               <td className="px-4 py-3 text-right">
                                 <button
@@ -391,10 +386,10 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
 
                             {/* SPF Record */}
                             <tr>
-                              <td className="px-4 py-3 font-bold text-emerald-600">TXT (SPF)</td>
+                              <td className="px-4 py-3 font-bold text-emerald-600">TXT Record (SPF)</td>
                               <td className="px-4 py-3">@</td>
                               <td className="px-4 py-3 text-gray-800">v=spf1 mx ~all</td>
-                              <td className="px-4 py-3 text-center">-</td>
+                              <td className="px-4 py-3 text-center">Automatic</td>
                               <td className="px-4 py-3">{renderStatusBadge(domain.spf_status)}</td>
                               <td className="px-4 py-3 text-right">
                                 <button
@@ -409,14 +404,14 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
 
                             {/* DKIM Record (2048-bit RSA) */}
                             <tr>
-                              <td className="px-4 py-3 font-bold text-purple-600">TXT (DKIM)</td>
+                              <td className="px-4 py-3 font-bold text-purple-600">TXT Record (DKIM)</td>
                               <td className="px-4 py-3">
                                 {domain.dkim_selector}._domainkey
                               </td>
                               <td className="px-4 py-3 text-gray-800 break-all max-w-xs truncate">
                                 v=DKIM1; k=rsa; p={domain.dkim_public_key}
                               </td>
-                              <td className="px-4 py-3 text-center">-</td>
+                              <td className="px-4 py-3 text-center">Automatic</td>
                               <td className="px-4 py-3">{renderStatusBadge(domain.dkim_status)}</td>
                               <td className="px-4 py-3 text-right">
                                 <button
@@ -433,12 +428,12 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
 
                             {/* DMARC Record */}
                             <tr>
-                              <td className="px-4 py-3 font-bold text-amber-600">TXT (DMARC)</td>
+                              <td className="px-4 py-3 font-bold text-amber-600">TXT Record (DMARC)</td>
                               <td className="px-4 py-3">_dmarc</td>
                               <td className="px-4 py-3 text-gray-800">
                                 v=DMARC1; p={domain.dmarc_policy}; rua=mailto:dmarc@{domain.domain_name}
                               </td>
-                              <td className="px-4 py-3 text-center">-</td>
+                              <td className="px-4 py-3 text-center">Automatic</td>
                               <td className="px-4 py-3">{renderStatusBadge(domain.dmarc_status)}</td>
                               <td className="px-4 py-3 text-right">
                                 <button
@@ -463,7 +458,7 @@ export const DomainManager: React.FC<DomainManagerProps> = ({
                     {/* Diagnostics and notes */}
                     {domain.dns_diagnostics && (
                       <div className="p-3 bg-white border border-gray-200 rounded-xl text-xs space-y-1">
-                        <div className="font-bold text-gray-800">Diagnostic Logs:</div>
+                        <div className="font-bold text-gray-800">Live DNS Resolution Output (8.8.8.8):</div>
                         <ul className="list-disc list-inside text-gray-600 space-y-0.5">
                           {domain.dns_diagnostics.notes?.map((n, i) => (
                             <li key={i}>{n}</li>
