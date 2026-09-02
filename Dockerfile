@@ -1,16 +1,18 @@
-# Multi-stage production build for Custom Domain Webmail
+# Multi-stage production Dockerfile for ApexMail Webmail Suite
 FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Copy package manifests
-COPY package*.json ./
-RUN npm ci
+# Copy dependency manifests
+COPY package.json package-lock.json* ./
 
-# Copy source code
+# Install all dependencies including build tools
+RUN npm install
+
+# Copy source code and config files
 COPY . .
 
-# Build Vite frontend and Express server bundle
+# Build Vite frontend assets and bundle Express backend to dist/server.cjs
 RUN npm run build
 
 # Production runtime stage
@@ -21,19 +23,13 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# Install production dependencies only
-COPY package*.json ./
-RUN npm ci --omit=dev
-
-# Copy compiled assets from builder stage
+# Copy production artifacts and dependencies
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/migrations ./migrations
 
-# Create upload directory
-RUN mkdir -p /app/uploads && chown -R node:node /app
-
-USER node
-
+# Expose container port
 EXPOSE 3000
 
+# Start compiled CommonJS production server
 CMD ["node", "dist/server.cjs"]

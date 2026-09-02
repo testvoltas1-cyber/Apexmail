@@ -1,17 +1,13 @@
-# Render Blueprint Configuration (render.yaml)
-# Zero-config deployment on Render (Free / Starter Web Service)
-
 services:
   - type: web
-    name: apexmail-custom-webmail
-    runtime: node
-    plan: free # or starter
-    buildCommand: npm install && npm run build
-    startCommand: npm run start
-    healthCheckPath: /api/health
+    name: apexmail-webmail
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: NODE_ENV
         value: production
       - key: JWT_SECRET
         generateValue: true
-
+      - key: GEMINI_API_KEY
+        sync: false
