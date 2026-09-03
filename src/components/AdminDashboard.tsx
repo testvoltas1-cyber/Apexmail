@@ -55,10 +55,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     secure: false,
     user: '',
     pass: '',
-    from_name: 'ApexMail Relay',
-    is_active: false,
+    from_name: 'PDFtoolkitpro',
+    is_active: true,
   });
   const [isSavingSmtp, setIsSavingSmtp] = useState(false);
+  const [isEditingSmtp, setIsEditingSmtp] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
 
   // 1-Click Auto Setup State
@@ -108,7 +109,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setLogs(logsRes.logs);
       setUsers(usersRes.users);
       setDomains(domainsRes.domains);
-      setSmtpConfig(smtpRes.config);
+      if (!isEditingSmtp) {
+        setSmtpConfig(smtpRes.config);
+      }
       setDeliveryLogs(deliveryRes.logs);
 
       if (domainsRes.domains.length > 0 && !newAccDomainId) {
@@ -183,6 +186,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     try {
       const res = await api.updateSmtpConfig(smtpConfig);
       setSmtpConfig(res.config);
+      setIsEditingSmtp(false);
       setSaveSuccessMsg('SMTP Server configuration saved successfully!');
       setTimeout(() => setSaveSuccessMsg(null), 4000);
     } catch (err: any) {
@@ -276,6 +280,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const applyPreset = (preset: 'namecheap_private' | 'namecheap_cpanel' | 'brevo' | 'sendgrid' | 'gmail') => {
+    setIsEditingSmtp(true);
     if (preset === 'namecheap_private') {
       setSmtpConfig(prev => ({
         ...prev,

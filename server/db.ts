@@ -450,17 +450,21 @@ class Database {
   // Global SMTP Configuration
   getSmtpConfig(): SmtpServerConfig {
     if (this.data.smtp_config) {
-      return this.data.smtp_config;
+      return {
+        ...this.data.smtp_config,
+        from_name: this.data.smtp_config.from_name || 'PDFtoolkitpro',
+        is_active: this.data.smtp_config.is_active !== undefined ? this.data.smtp_config.is_active : true,
+      };
     }
-    // Return env-based or default config
+    // Return default config
     return {
       host: process.env.SMTP_DEFAULT_HOST || '',
       port: Number(process.env.SMTP_DEFAULT_PORT) || 587,
       secure: process.env.SMTP_DEFAULT_SECURE === 'true',
       user: process.env.SMTP_DEFAULT_USER || '',
       pass: process.env.SMTP_DEFAULT_PASS || '',
-      from_name: process.env.SMTP_DEFAULT_FROM_NAME || 'ApexMail Relay',
-      is_active: Boolean(process.env.SMTP_DEFAULT_HOST && process.env.SMTP_DEFAULT_USER),
+      from_name: process.env.SMTP_DEFAULT_FROM_NAME || 'PDFtoolkitpro',
+      is_active: true,
     };
   }
 
@@ -469,6 +473,8 @@ class Database {
     this.data.smtp_config = {
       ...current,
       ...config,
+      is_active: config.is_active !== undefined ? Boolean(config.is_active) : current.is_active,
+      from_name: config.from_name?.trim() || current.from_name || 'PDFtoolkitpro',
     };
     this.save();
     return this.data.smtp_config;
