@@ -124,7 +124,17 @@ class Database {
       outbox: [],
       contacts: [],
       audit_logs: auditLogs,
+      smtp_config: {
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        user: 'testvoltas1@gmail.com',
+        pass: 'joxg mchu gmml tvno',
+        from_name: 'PDFtoolkitpro',
+        is_active: true,
+      }
     };
+    this.save();
   }
 
   // User Operations
@@ -458,12 +468,12 @@ class Database {
     }
     // Return default config
     return {
-      host: process.env.SMTP_DEFAULT_HOST || '',
-      port: Number(process.env.SMTP_DEFAULT_PORT) || 587,
-      secure: process.env.SMTP_DEFAULT_SECURE === 'true',
-      user: process.env.SMTP_DEFAULT_USER || '',
-      pass: process.env.SMTP_DEFAULT_PASS || '',
-      from_name: process.env.SMTP_DEFAULT_FROM_NAME || 'PDFtoolkitpro',
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
+      user: 'testvoltas1@gmail.com',
+      pass: 'joxg mchu gmml tvno',
+      from_name: 'PDFtoolkitpro',
       is_active: true,
     };
   }
