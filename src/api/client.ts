@@ -159,6 +159,10 @@ export const api = {
     return apiFetch<{ success: boolean }>(`/api/mailboxes/${id}`, { method: 'DELETE' });
   },
 
+  async deleteUser(id: string): Promise<{ success: boolean }> {
+    return apiFetch<{ success: boolean }>(`/api/admin/users/${id}`, { method: 'DELETE' });
+  },
+
   // Emails
   async getEmails(params: { folder?: string; mailbox_id?: string; q?: string; label?: string } = {}): Promise<{ emails: Email[]; count: number }> {
     const query = new URLSearchParams();

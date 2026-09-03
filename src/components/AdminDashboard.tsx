@@ -223,6 +223,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const handleDeleteUser = async (userId: string, userEmail: string) => {
+    if (!confirm(`Are you sure you want to delete user account "${userEmail}"? This will also remove associated mailboxes and data.`)) {
+      return;
+    }
+    try {
+      await api.deleteUser(userId);
+      setUsers(users.filter(u => u.id !== userId));
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete user');
+    }
+  };
+
   const handleAutoSetup = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!autoPass.trim()) {
@@ -544,253 +556,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="text-[11px] font-medium text-rose-800">Direct MX Delivery</div>
                 <div className="text-[10px] text-rose-700">Blocked by Render to prevent spam. Use Port 587 or 465 instead.</div>
               </div>
-            </div>
-          </div>
-
-          {/* 1-Click Automatic Fix & Setup Card */}
-          <div className="bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
-            <div className="relative z-10 space-y-4">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                <div className="space-y-1">
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-500/30 text-purple-200 border border-purple-400/30 rounded-full text-[11px] font-semibold">
-                    <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
-                    <span>Automatic Setup & Fix Engine</span>
-                  </div>
-                  <h2 className="text-base font-bold text-white">1-Click Auto-Configure & Fix Outbound Mail Server</h2>
-                  <p className="text-xs text-purple-200/80 max-w-2xl">
-                    Outbound emails to outside services (like Gmail) require an SMTP Relay. Select your email provider below to test and connect instantly:
-                  </p>
-                </div>
-              </div>
-
-              {/* Provider Selection Tabs */}
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAutoProvider('namecheap');
-                    setAutoEmail('pankaj.bhardwaj@pdftoolkitpro.online');
-                    setAutoSetupError(null);
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                    autoProvider === 'namecheap'
-                      ? 'bg-purple-500 text-white shadow-sm'
-                      : 'bg-white/10 text-purple-200 hover:bg-white/20'
-                  }`}
-                >
-                  <span>Namecheap Private Email</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAutoProvider('gmail');
-                    setAutoEmail('');
-                    setAutoSetupError(null);
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                    autoProvider === 'gmail'
-                      ? 'bg-purple-500 text-white shadow-sm'
-                      : 'bg-white/10 text-purple-200 hover:bg-white/20'
-                  }`}
-                >
-                  <span>Gmail / Google (Free 500/day)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAutoProvider('brevo');
-                    setAutoEmail('');
-                    setAutoSetupError(null);
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                    autoProvider === 'brevo'
-                      ? 'bg-purple-500 text-white shadow-sm'
-                      : 'bg-white/10 text-purple-200 hover:bg-white/20'
-                  }`}
-                >
-                  <span>Brevo Relay (Free 300/day)</span>
-                </button>
-              </div>
-
-              <form onSubmit={handleAutoSetup} className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/15 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-                <div>
-                  <label className="block text-[11px] font-semibold text-purple-200 mb-1">
-                    {autoProvider === 'gmail'
-                      ? 'Your Gmail Address'
-                      : autoProvider === 'brevo'
-                      ? 'Brevo SMTP User / Email'
-                      : 'Email / Mailbox Address'}
-                  </label>
-                  <input
-                    type={autoProvider === 'brevo' ? 'text' : 'email'}
-                    value={autoEmail}
-                    onChange={(e) => setAutoEmail(e.target.value)}
-                    placeholder={
-                      autoProvider === 'gmail'
-                        ? 'you@gmail.com'
-                        : autoProvider === 'brevo'
-                        ? 'brevo-login@domain.com'
-                        : 'pankaj.bhardwaj@pdftoolkitpro.online'
-                    }
-                    className="w-full px-3 py-2 bg-white/20 text-white placeholder-purple-300/60 border border-white/20 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-purple-400"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-purple-200 mb-1">
-                    {autoProvider === 'gmail'
-                      ? 'Google 16-char App Password'
-                      : autoProvider === 'brevo'
-                      ? 'Brevo Master SMTP Key'
-                      : 'Mailbox Password'}
-                  </label>
-                  <input
-                    type="password"
-                    value={autoPass}
-                    onChange={(e) => setAutoPass(e.target.value)}
-                    placeholder={
-                      autoProvider === 'gmail'
-                        ? '16-character app password'
-                        : autoProvider === 'brevo'
-                        ? 'xsmtpsib-...'
-                        : 'Enter your mailbox password'
-                    }
-                    className="w-full px-3 py-2 bg-white/20 text-white placeholder-purple-300/60 border border-white/20 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-purple-400"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <button
-                    type="submit"
-                    disabled={isAutoSettingUp}
-                    className="w-full px-4 py-2 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white text-xs font-bold rounded-lg shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 h-[38px]"
-                  >
-                    {isAutoSettingUp ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>Auto-Connecting...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Zap className="w-4 h-4 text-yellow-300" />
-                        <span>⚡ Test &amp; Connect Relay</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-
-              {autoSetupSuccess && (
-                <div className="p-3 bg-emerald-500/20 border border-emerald-400/40 rounded-xl text-emerald-200 text-xs flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>{autoSetupSuccess}</span>
-                </div>
-              )}
-
-              {autoSetupError && (
-                <div className="p-3 bg-rose-500/20 border border-rose-400/40 rounded-xl text-rose-200 text-xs space-y-2">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                    <div>
-                      <div className="font-semibold">{autoSetupError}</div>
-                    </div>
-                  </div>
-
-                  {autoProvider === 'namecheap' && (
-                    <div className="pl-6 text-[11px] text-rose-200/90 space-y-1 bg-black/20 p-2 rounded-lg border border-rose-400/20">
-                      <div className="font-semibold text-rose-300">Why did Namecheap reject this?</div>
-                      <div>
-                        1. <strong>Did you purchase Namecheap Private Email?</strong> <br/>
-                        If you only bought the domain <code>pdftoolkitpro.online</code> without buying the Private Email hosting add-on from Namecheap, <code>mail.privateemail.com</code> does not have an account for this mailbox. Switch to <strong>Gmail (App Password)</strong> or <strong>Brevo</strong> above to send free!
-                      </div>
-                      <div>
-                        2. <strong>If you DO have Namecheap Private Email:</strong> <br/>
-                        Confirm you can login at <a href="https://privateemail.com" target="_blank" rel="noreferrer" className="underline text-yellow-300 font-bold">privateemail.com</a> with this exact email and password.
-                      </div>
-                    </div>
-                  )}
-
-                  {autoProvider === 'gmail' && (
-                    <div className="pl-6 text-[11px] text-rose-200/90 bg-black/20 p-2 rounded-lg border border-rose-400/20">
-                      <strong>Tip for Gmail:</strong> You cannot use your normal Gmail account password. You must generate a 16-character <em>App Password</em> in your Google Account &gt; Security &gt; 2-Step Verification &gt; App Passwords.
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {autoSetupLogs.length > 0 && (
-                <div className="bg-black/40 border border-white/10 rounded-lg p-2.5 font-mono text-[11px] text-purple-200 space-y-1">
-                  {autoSetupLogs.map((log, idx) => (
-                    <div key={idx} className="leading-tight">{log}</div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Quick 1-Click Presets */}
-          <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-xs space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-purple-600" />
-                <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wide">1-Click Quick Provider Presets</h3>
-              </div>
-              <span className="text-[11px] text-gray-400">Click to fill host & recommended port</span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
-              <button
-                type="button"
-                onClick={() => applyPreset('namecheap_private')}
-                className="p-2.5 rounded-xl border border-gray-200 hover:border-purple-400 hover:bg-purple-50/50 text-left transition-all group"
-              >
-                <div className="font-bold text-xs text-gray-900 group-hover:text-purple-700">Namecheap Email</div>
-                <div className="text-[10px] text-gray-500 font-mono">mail.privateemail.com</div>
-                <div className="text-[9px] text-purple-600 font-medium mt-0.5">Port 465 (SSL)</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => applyPreset('namecheap_cpanel')}
-                className="p-2.5 rounded-xl border border-gray-200 hover:border-purple-400 hover:bg-purple-50/50 text-left transition-all group"
-              >
-                <div className="font-bold text-xs text-gray-900 group-hover:text-purple-700">cPanel Webmail</div>
-                <div className="text-[10px] text-gray-500 font-mono">mail.yourdomain.com</div>
-                <div className="text-[9px] text-purple-600 font-medium mt-0.5">Port 465 (SSL)</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => applyPreset('brevo')}
-                className="p-2.5 rounded-xl border border-gray-200 hover:border-purple-400 hover:bg-purple-50/50 text-left transition-all group"
-              >
-                <div className="font-bold text-xs text-gray-900 group-hover:text-purple-700">Brevo (Free 300/day)</div>
-                <div className="text-[10px] text-gray-500 font-mono">smtp-relay.brevo.com</div>
-                <div className="text-[9px] text-emerald-600 font-medium mt-0.5">Port 587 (TLS)</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => applyPreset('sendgrid')}
-                className="p-2.5 rounded-xl border border-gray-200 hover:border-purple-400 hover:bg-purple-50/50 text-left transition-all group"
-              >
-                <div className="font-bold text-xs text-gray-900 group-hover:text-purple-700">SendGrid Relay</div>
-                <div className="text-[10px] text-gray-500 font-mono">smtp.sendgrid.net</div>
-                <div className="text-[9px] text-emerald-600 font-medium mt-0.5">Port 587 (TLS)</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => applyPreset('gmail')}
-                className="p-2.5 rounded-xl border border-gray-200 hover:border-purple-400 hover:bg-purple-50/50 text-left transition-all group"
-              >
-                <div className="font-bold text-xs text-gray-900 group-hover:text-purple-700">Google Workspace</div>
-                <div className="text-[10px] text-gray-500 font-mono">smtp.gmail.com</div>
-                <div className="text-[9px] text-purple-600 font-medium mt-0.5">Port 465 (SSL)</div>
-              </button>
             </div>
           </div>
 
@@ -1334,6 +1099,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <th className="px-4 py-3">Storage Used</th>
                   <th className="px-4 py-3">Quota</th>
                   <th className="px-4 py-3">Joined</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -1358,6 +1124,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </td>
                     <td className="px-4 py-3 text-gray-500">
                       {new Date(u.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => handleDeleteUser(u.id, u.email)}
+                        className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        title="Delete User Account"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </td>
                   </tr>
                 ))}

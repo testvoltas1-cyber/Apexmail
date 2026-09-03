@@ -1010,6 +1010,23 @@ ${body_html || `<p>${(body_text || 'This is a test inbound email message receive
     res.json({ users });
   });
 
+  app.delete('/api/admin/users/:id', authMiddleware, (req: AuthRequest, res) => {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const { id } = req.params;
+    const targetUser = db.getUsers().find(u => u.id === id);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const deleted = db.deleteUser(id);
+    if (deleted) {
+      db.logAction('DELETE_USER', { deleted_email: targetUser.email }, req.user.id, req.ip);
+      return res.json({ success: true });
+    }
+    res.status(500).json({ error: 'Failed to delete user' });
+  });
+
   // ==========================================
   // SMTP RELAY & MAIL SERVER MANAGEMENT
   // ==========================================
@@ -1078,13 +1095,14 @@ ${body_html || `<p>${(body_text || 'This is a test inbound email message receive
     };
 
     // Run live test with auto-discovery
+    const testEmailRecipient = (req.user?.email && !req.user.email.includes('.internal')) ? req.user.email : (autoConfig.user || 'testvoltas1@gmail.com');
     const testResult = await testSmtpConnection({
       host: autoConfig.host,
       port: autoConfig.port,
       secure: autoConfig.secure,
       user: autoConfig.user,
       pass: autoConfig.pass,
-      to_email: req.user?.email,
+      to_email: testEmailRecipient,
       from_email: autoConfig.user,
     });
 
@@ -1142,13 +1160,17 @@ ${body_html || `<p>${(body_text || 'This is a test inbound email message receive
 
   app.post('/api/admin/smtp/test', authMiddleware, async (req: AuthRequest, res) => {
     const { host, port, secure, user, pass, to_email, from_email } = req.body;
+    let recipientEmail = to_email;
+    if (!recipientEmail || recipientEmail.includes('.internal')) {
+      recipientEmail = (req.user?.email && !req.user.email.includes('.internal')) ? req.user.email : (user || db.getSmtpConfig().user || 'testvoltas1@gmail.com');
+    }
     const testResult = await testSmtpConnection({
       host: host || '',
       port: Number(port) || 587,
       secure: Boolean(secure),
       user: user || '',
       pass: pass || '',
-      to_email: to_email || req.user?.email,
+      to_email: recipientEmail,
       from_email: from_email,
     });
 
