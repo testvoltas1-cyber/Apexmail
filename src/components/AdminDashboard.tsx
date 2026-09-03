@@ -49,15 +49,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isFlushingOutbox, setIsFlushingOutbox] = useState(false);
 
   // SMTP Server Configuration State
-  const [smtpConfig, setSmtpConfig] = useState<SmtpServerConfig>({
-    host: '',
-    port: 587,
-    secure: false,
-    user: '',
-    pass: '',
-    from_name: 'PDFtoolkitpro',
-    is_active: true,
+  const [smtpConfig, setSmtpConfig] = useState<SmtpServerConfig>(() => {
+    try {
+      const saved = localStorage.getItem('apexmail_smtp_config_draft');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {
+      host: '',
+      port: 587,
+      secure: false,
+      user: '',
+      pass: '',
+      from_name: 'PDFtoolkitpro',
+      is_active: true,
+    };
   });
+
+  const handleSmtpFieldChange = (updates: Partial<SmtpServerConfig>) => {
+    setIsEditingSmtp(true);
+    setSmtpConfig(prev => {
+      const next = { ...prev, ...updates };
+      try {
+        localStorage.setItem('apexmail_smtp_config_draft', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
   const [isSavingSmtp, setIsSavingSmtp] = useState(false);
   const [isEditingSmtp, setIsEditingSmtp] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
@@ -187,6 +204,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const res = await api.updateSmtpConfig(smtpConfig);
       setSmtpConfig(res.config);
       setIsEditingSmtp(false);
+      try {
+        localStorage.removeItem('apexmail_smtp_config_draft');
+      } catch {}
       setSaveSuccessMsg('SMTP Server configuration saved successfully!');
       setTimeout(() => setSaveSuccessMsg(null), 4000);
     } catch (err: any) {
@@ -280,49 +300,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const applyPreset = (preset: 'namecheap_private' | 'namecheap_cpanel' | 'brevo' | 'sendgrid' | 'gmail') => {
-    setIsEditingSmtp(true);
     if (preset === 'namecheap_private') {
-      setSmtpConfig(prev => ({
-        ...prev,
+      handleSmtpFieldChange({
         host: 'mail.privateemail.com',
         port: 465,
         secure: true,
         is_active: true,
-      }));
+      });
     } else if (preset === 'namecheap_cpanel') {
       const domName = domains[0]?.domain_name || 'yourdomain.com';
-      setSmtpConfig(prev => ({
-        ...prev,
+      handleSmtpFieldChange({
         host: `mail.${domName}`,
         port: 465,
         secure: true,
         is_active: true,
-      }));
+      });
     } else if (preset === 'brevo') {
-      setSmtpConfig(prev => ({
-        ...prev,
+      handleSmtpFieldChange({
         host: 'smtp-relay.brevo.com',
         port: 587,
         secure: false,
         is_active: true,
-      }));
+      });
     } else if (preset === 'sendgrid') {
-      setSmtpConfig(prev => ({
-        ...prev,
+      handleSmtpFieldChange({
         host: 'smtp.sendgrid.net',
         port: 587,
         secure: false,
         user: 'apikey',
         is_active: true,
-      }));
+      });
     } else if (preset === 'gmail') {
-      setSmtpConfig(prev => ({
-        ...prev,
+      handleSmtpFieldChange({
         host: 'smtp.gmail.com',
         port: 465,
         secure: true,
         is_active: true,
-      }));
+      });
     }
   };
 
@@ -586,7 +600,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <input
                     type="checkbox"
                     checked={smtpConfig.is_active}
-                    onChange={(e) => setSmtpConfig({ ...smtpConfig, is_active: e.target.checked })}
+                    onChange={(e) => handleSmtpFieldChange({ is_active: e.target.checked })}
                     className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500 cursor-pointer"
                   />
                 </label>
@@ -603,7 +617,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     type="text"
                     required
                     value={smtpConfig.host}
-                    onChange={(e) => setSmtpConfig({ ...smtpConfig, host: e.target.value })}
+                    onChange={(e) => handleSmtpFieldChange({ host: e.target.value })}
                     placeholder="e.g. mail.privateemail.com or smtp-relay.brevo.com"
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-500 font-mono"
                   />
@@ -619,8 +633,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     value={smtpConfig.port}
                     onChange={(e) => {
                       const p = Number(e.target.value);
-                      setSmtpConfig({ 
-                        ...smtpConfig, 
+                      handleSmtpFieldChange({ 
                         port: p,
                         secure: p === 465 ? true : p === 587 ? false : smtpConfig.secure 
                       });
@@ -639,7 +652,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <input
                     type="text"
                     value={smtpConfig.user}
-                    onChange={(e) => setSmtpConfig({ ...smtpConfig, user: e.target.value })}
+                    onChange={(e) => handleSmtpFieldChange({ user: e.target.value })}
                     placeholder="e.g. support@yourdomain.com or apikey"
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-500"
                   />
@@ -653,7 +666,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <input
                     type="password"
                     value={smtpConfig.pass}
-                    onChange={(e) => setSmtpConfig({ ...smtpConfig, pass: e.target.value })}
+                    onChange={(e) => handleSmtpFieldChange({ pass: e.target.value })}
                     placeholder="••••••••••••"
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-500 font-mono"
                   />
@@ -669,8 +682,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <input
                     type="text"
                     value={smtpConfig.from_name || ''}
-                    onChange={(e) => setSmtpConfig({ ...smtpConfig, from_name: e.target.value })}
-                    placeholder="e.g. ApexMail Dispatch"
+                    onChange={(e) => handleSmtpFieldChange({ from_name: e.target.value })}
+                    placeholder="PDFtoolkitpro"
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-500"
                   />
                 </div>
@@ -682,8 +695,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       checked={smtpConfig.secure}
                       onChange={(e) => {
                         const isSec = e.target.checked;
-                        setSmtpConfig({ 
-                          ...smtpConfig, 
+                        handleSmtpFieldChange({ 
                           secure: isSec,
                           port: isSec && smtpConfig.port === 587 ? 465 : (!isSec && smtpConfig.port === 465 ? 587 : smtpConfig.port)
                         });
