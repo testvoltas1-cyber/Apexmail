@@ -33,6 +33,8 @@ interface EmailListProps {
   onBulkAction: (action: string, ids: string[], value?: any) => Promise<void>;
   onOpenCompose: () => void;
   onOpenSimulator: () => void;
+  customLabels: { name: string; color: string }[];
+  onAddLabel: (name: string, color: string) => void;
 }
 
 export const EmailList: React.FC<EmailListProps> = ({
@@ -47,6 +49,8 @@ export const EmailList: React.FC<EmailListProps> = ({
   onBulkAction,
   onOpenCompose,
   onOpenSimulator,
+  customLabels,
+  onAddLabel,
 }) => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'primary' | 'promotions' | 'social'>('primary');
@@ -210,31 +214,50 @@ export const EmailList: React.FC<EmailListProps> = ({
 
                 {showLabelMenu && (
                   <div 
-                    className="absolute left-0 mt-1 w-44 bg-white rounded-xl shadow-xl border border-gray-200 py-1.5 z-50 text-xs"
-                    onClick={() => setShowLabelMenu(false)}
+                    className="absolute left-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-gray-200 py-1.5 z-50 text-xs"
+                    onClick={(e) => e.stopPropagation()}
                   >
                     <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">
                       Apply Label
                     </div>
-                    {['Work', 'Important', 'Design', 'Billing', 'Personal'].map((lbl) => (
+                    {customLabels.map((l) => (
                       <button
-                        key={lbl}
+                        key={l.name}
                         onClick={() => {
-                          // Apply label to all selected
                           selectedIds.forEach((id) => {
                             const email = emails.find((e) => e.id === id);
-                            if (email && !email.labels.includes(lbl)) {
-                              onBulkAction('label', [id], [...email.labels, lbl]);
+                            if (email && !email.labels.includes(l.name)) {
+                              onBulkAction('label', [id], [...email.labels, l.name]);
                             }
                           });
                           setSelectedIds([]);
+                          setShowLabelMenu(false);
                         }}
                         className="w-full px-3 py-1.5 text-left hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                       >
-                        <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                        <span>{lbl}</span>
+                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${l.color}`}></span>
+                        <span className="truncate">{l.name}</span>
                       </button>
                     ))}
+                    {customLabels.length === 0 && (
+                      <div className="px-3 py-2 text-gray-400 italic text-[11px]">No labels available</div>
+                    )}
+                    <div className="border-t border-gray-100 mt-1 pt-1">
+                      <button
+                        onClick={() => {
+                          setShowLabelMenu(false);
+                          const name = prompt('Enter new label name:');
+                          if (name && name.trim()) {
+                            const colors = ['bg-blue-500', 'bg-red-500', 'bg-purple-500', 'bg-emerald-500', 'bg-amber-500', 'bg-indigo-500'];
+                            const randomColor = colors[Math.floor(Math.random() * colors.length)];
+                            onAddLabel(name.trim(), randomColor);
+                          }
+                        }}
+                        className="w-full px-3 py-1.5 text-left hover:bg-blue-50 text-blue-600 font-semibold flex items-center gap-1.5"
+                      >
+                        <span>+ Create New Label</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

@@ -35,6 +35,39 @@ export const App: React.FC = () => {
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Custom User Labels State
+  const [customLabels, setCustomLabels] = useState<{ name: string; color: string }[]>(() => {
+    try {
+      const saved = localStorage.getItem('apexmail_custom_labels');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('apexmail_custom_labels', JSON.stringify(customLabels));
+    } catch {}
+  }, [customLabels]);
+
+  const handleAddCustomLabel = (name: string, color: string) => {
+    if (!name.trim()) return;
+    if (customLabels.some(l => l.name.toLowerCase() === name.toLowerCase())) {
+      alert('Label already exists');
+      return;
+    }
+    setCustomLabels(prev => [...prev, { name: name.trim(), color }]);
+  };
+
+  const handleDeleteCustomLabel = (labelName: string) => {
+    if (confirm(`Delete label "${labelName}"?`)) {
+      setCustomLabels(prev => prev.filter(l => l.name !== labelName));
+      if (selectedLabel === labelName) {
+        setSelectedLabel(null);
+      }
+    }
+  };
+
   // Selected Email & Thread Viewer
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
   const [threadEmails, setThreadEmails] = useState<Email[]>([]);
@@ -285,6 +318,9 @@ export const App: React.FC = () => {
             setSelectedLabel(lbl);
             setSelectedEmail(null);
           }}
+          customLabels={customLabels}
+          onAddLabel={handleAddCustomLabel}
+          onDeleteLabel={handleDeleteCustomLabel}
         />
 
         {/* View Router */}
@@ -319,6 +355,8 @@ export const App: React.FC = () => {
                   setIsComposeOpen(true);
                 }}
                 onOpenSimulator={() => setIsSimulatorOpen(true)}
+                customLabels={customLabels}
+                onAddLabel={handleAddCustomLabel}
               />
             )
           )}

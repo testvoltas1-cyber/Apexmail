@@ -36,6 +36,9 @@ interface SidebarProps {
   onSelectMailbox: (mailbox: Mailbox | null) => void;
   selectedLabel: string | null;
   onSelectLabel: (label: string | null) => void;
+  customLabels: { name: string; color: string }[];
+  onAddLabel: (name: string, color: string) => void;
+  onDeleteLabel: (name: string) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -53,6 +56,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectMailbox,
   selectedLabel,
   onSelectLabel,
+  customLabels,
+  onAddLabel,
+  onDeleteLabel,
 }) => {
   const folders = [
     { id: 'inbox', label: 'Inbox', icon: Inbox, count: unreadCount, badgeColor: 'bg-blue-600 text-white' },
@@ -64,13 +70,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'trash', label: 'Trash', icon: Trash2, count: 0 },
   ];
 
-  const labels = [
-    { name: 'Work', color: 'bg-blue-500' },
-    { name: 'Important', color: 'bg-red-500' },
-    { name: 'Design', color: 'bg-purple-500' },
-    { name: 'Billing', color: 'bg-emerald-500' },
-    { name: 'Personal', color: 'bg-amber-500' },
-  ];
+  const handleCreateLabelClick = () => {
+    const name = prompt('Enter new label name:');
+    if (!name || !name.trim()) return;
+    const colors = ['bg-blue-500', 'bg-red-500', 'bg-purple-500', 'bg-emerald-500', 'bg-amber-500', 'bg-indigo-500', 'bg-pink-500', 'bg-teal-500'];
+    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+    onAddLabel(name.trim(), randomColor);
+  };
 
   const storageUsedMB = ((user?.storage_used_bytes || 0) / (1024 * 1024)).toFixed(1);
   const storagePercentage = Math.min(100, Math.max(1, ((user?.storage_used_bytes || 0) / 10737418240) * 100));
@@ -132,32 +138,53 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="pt-2 border-t border-gray-200">
           <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-gray-400 flex items-center justify-between">
             <span>Labels</span>
-            <Tag className="w-3 h-3 text-gray-400" />
+            <button
+              onClick={handleCreateLabelClick}
+              className="p-1 hover:bg-gray-200 rounded text-gray-500 hover:text-gray-900 transition-colors"
+              title="Create New Label"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
           </div>
           <div className="space-y-0.5">
-            {labels.map((l) => {
+            {customLabels.map((l) => {
               const isLabelActive = activeView === 'mail' && selectedLabel === l.name;
               return (
-                <button
+                <div
                   key={l.name}
                   onClick={() => {
                     onChangeView('mail');
                     onSelectLabel(isLabelActive ? null : l.name);
                   }}
-                  className={`w-full flex items-center justify-between px-3 py-1.5 rounded-r-full text-xs transition-colors ${
+                  className={`w-full flex items-center justify-between px-3 py-1.5 rounded-r-full text-xs transition-colors cursor-pointer group ${
                     isLabelActive
                       ? 'bg-blue-50 text-blue-800 font-bold'
                       : 'text-gray-600 hover:bg-gray-200/60'
                   }`}
                 >
-                  <div className="flex items-center gap-2.5">
-                    <span className={`w-2.5 h-2.5 rounded-full ${l.color}`}></span>
-                    <span>{l.name}</span>
+                  <div className="flex items-center gap-2.5 truncate">
+                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${l.color}`}></span>
+                    <span className="truncate">{l.name}</span>
                   </div>
-                  {isLabelActive && <ChevronRight className="w-3 h-3 text-blue-600" />}
-                </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteLabel(l.name);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-rose-600 transition-opacity"
+                      title="Delete Label"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                    {isLabelActive && <ChevronRight className="w-3 h-3 text-blue-600 shrink-0" />}
+                  </div>
+                </div>
               );
             })}
+            {customLabels.length === 0 && (
+              <div className="px-3 py-1 text-[11px] text-gray-400 italic">No custom labels yet. Click + to add.</div>
+            )}
           </div>
         </div>
 
@@ -216,20 +243,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Quick Admin Navigation */}
-        <div className="flex gap-1 text-center text-[11px]">
-          <button
-            onClick={() => onChangeView('domains')}
-            className={`flex-1 py-1.5 rounded-lg border font-semibold flex items-center justify-center gap-1 transition-colors ${
-              activeView === 'domains'
-                ? 'bg-blue-600 text-white border-blue-600'
-                : 'bg-white text-gray-700 hover:bg-gray-100 border-gray-200'
-            }`}
-          >
-            <Globe className="w-3 h-3" />
-            <span>Domains</span>
-          </button>
-          {user?.role === 'admin' && (
+        {/* Quick Admin Navigation (Admin Only) */}
+        {user?.role === 'admin' && (
+          <div className="flex gap-1 text-center text-[11px]">
+            <button
+              onClick={() => onChangeView('domains')}
+              className={`flex-1 py-1.5 rounded-lg border font-semibold flex items-center justify-center gap-1 transition-colors ${
+                activeView === 'domains'
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-700 hover:bg-gray-100 border-gray-200'
+              }`}
+            >
+              <Globe className="w-3 h-3" />
+              <span>Domains</span>
+            </button>
             <button
               onClick={() => onChangeView('admin')}
               className={`flex-1 py-1.5 rounded-lg border font-semibold flex items-center justify-center gap-1 transition-colors ${
@@ -241,8 +268,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <ShieldCheck className="w-3 h-3" />
               <span>Admin</span>
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </aside>
   );

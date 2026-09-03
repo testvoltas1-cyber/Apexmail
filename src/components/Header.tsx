@@ -250,15 +250,7 @@ export const Header: React.FC<HeaderProps> = ({
           <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-600' : ''}`} />
         </button>
 
-        {/* Inbound Simulator Sandbox */}
-        <button
-          onClick={onOpenSimulator}
-          className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-full transition-colors shadow-xs"
-          title="Test Inbound SMTP Delivery Sandbox"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-          <span>Test Inbound Mail</span>
-        </button>
+
 
         {/* View Switcher Tabs (Domains, Admin, Contacts) */}
         <button
@@ -368,20 +360,15 @@ export const Header: React.FC<HeaderProps> = ({
                   <Settings className="w-4 h-4 text-gray-400" />
                   <span>Email Signatures & SMTP Setup</span>
                 </button>
-                <button
-                  onClick={() => onChangeView('domains')}
-                  className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                >
-                  <Globe className="w-4 h-4 text-gray-400" />
-                  <span>Domain DNS & MX Verification</span>
-                </button>
-                <button
-                  onClick={onOpenSimulator}
-                  className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2 text-indigo-700 font-medium"
-                >
-                  <Sparkles className="w-4 h-4 text-indigo-500" />
-                  <span>Test Inbound Mail Simulator</span>
-                </button>
+                {user?.role === 'admin' && (
+                  <button
+                    onClick={() => onChangeView('domains')}
+                    className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                  >
+                    <Globe className="w-4 h-4 text-gray-400" />
+                    <span>Domain DNS & MX Verification</span>
+                  </button>
+                )}
               </div>
 
               <div className="pt-2 border-t border-gray-100 px-2 flex gap-1">
